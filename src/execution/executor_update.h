@@ -37,8 +37,18 @@ class UpdateExecutor : public AbstractExecutor {
         rids_ = rids;
         context_ = context;
     }
+
     std::unique_ptr<RmRecord> Next() override {
-        
+        for (auto &rid : rids_) {
+            auto rec = fh_->get_record(rid, context_);
+            for (auto &set_clause : set_clauses_) {
+                auto col_meta = tab_.get_col(set_clause.lhs.col_name);
+                set_clause.rhs.init_raw(col_meta->len);
+                memcpy(rec->data + col_meta->offset, set_clause.rhs.raw->data, col_meta->len);
+                if (set_clause.rhs.raw) set_clause.rhs.raw.reset();
+            }
+            fh_->update_record(rid, rec->data, context_);
+        }
         return nullptr;
     }
 
