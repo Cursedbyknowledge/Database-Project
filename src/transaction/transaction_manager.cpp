@@ -14,51 +14,37 @@ See the Mulan PSL v2 for more details. */
 
 std::unordered_map<txn_id_t, Transaction *> TransactionManager::txn_map = {};
 
-/**
- * @description: 事务的开始方法
- * @return {Transaction*} 开始事务的指针
- * @param {Transaction*} txn 事务指针，空指针代表需要创建新事务，否则开始已有事务
- * @param {LogManager*} log_manager 日志管理器指针
- */
 Transaction * TransactionManager::begin(Transaction* txn, LogManager* log_manager) {
-    // Todo:
-    // 1. 判断传入事务参数是否为空指针
-    // 2. 如果为空指针，创建新事务
-    // 3. 把开始事务加入到全局事务表中
-    // 4. 返回当前事务指针
-    // 如果需要支持MVCC请在上述过程中添加代码
-    
-    return nullptr;
+    if (txn != nullptr) {
+        return txn;
+    }
+    txn_id_t txn_id = next_txn_id_.fetch_add(1);
+    auto *new_txn = new Transaction(txn_id);
+    new_txn->set_state(TransactionState::GROWING);
+    std::unique_lock<std::mutex> lock(latch_);
+    txn_map[txn_id] = new_txn;
+    lock.unlock();
+    return new_txn;
 }
 
-/**
- * @description: 事务的提交方法
- * @param {Transaction*} txn 需要提交的事务
- * @param {LogManager*} log_manager 日志管理器指针
- */
 void TransactionManager::commit(Transaction* txn, LogManager* log_manager) {
-    // Todo:
-    // 1. 如果存在未提交的写操作，提交所有的写操作
-    // 2. 释放所有锁
-    // 3. 释放事务相关资源，eg.锁集
-    // 4. 把事务日志刷入磁盘中
-    // 5. 更新事务状态
-    // 如果需要支持MVCC请在上述过程中添加代码
-
+    txn->set_state(TransactionState::COMMITTED);
+    if (log_manager != nullptr) {
+        log_manager->flush_log_to_disk();
+    }
+    std::unique_lock<std::mutex> lock(latch_);
+    txn_map.erase(txn->get_transaction_id());
+    lock.unlock();
+    delete txn;
 }
 
-/**
- * @description: 事务的终止（回滚）方法
- * @param {Transaction *} txn 需要回滚的事务
- * @param {LogManager} *log_manager 日志管理器指针
- */
 void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
-    // Todo:
-    // 1. 回滚所有写操作
-    // 2. 释放所有锁
-    // 3. 清空事务相关资源，eg.锁集
-    // 4. 把事务日志刷入磁盘中
-    // 5. 更新事务状态
-    // 如果需要支持MVCC请在上述过程中添加代码
-    
+    txn->set_state(TransactionState::ABORTED);
+    if (log_manager != nullptr) {
+        log_manager->flush_log_to_disk();
+    }
+    std::unique_lock<std::mutex> lock(latch_);
+    txn_map.erase(txn->get_transaction_id());
+    lock.unlock();
+    delete txn;
 }
