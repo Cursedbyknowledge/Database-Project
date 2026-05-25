@@ -138,6 +138,8 @@ void *client_handler(void *sock_fd) {
                     offset = str.length();
 
                     txn_manager->abort(context->txn_, log_manager.get());
+                    context->txn_ = nullptr;
+                    txn_id = INVALID_TXN_ID;
                     std::cout << e.GetInfo() << std::endl;
 
                     std::fstream outfile;
@@ -166,9 +168,10 @@ void *client_handler(void *sock_fd) {
         if (write(fd, data_send, offset + 1) == -1) {
             break;
         }
-        if(context->txn_->get_txn_mode() == false)
+        if(context->txn_ != nullptr && context->txn_->get_txn_mode() == false)
         {
             txn_manager->commit(context->txn_, context->log_mgr_);
+            txn_id = INVALID_TXN_ID;
         }
     }
 
