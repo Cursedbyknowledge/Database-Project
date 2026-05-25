@@ -25,13 +25,30 @@ See the Mulan PSL v2 for more details. */
 // 目前的索引匹配规则为：完全匹配索引字段，且全部为单点查询，不会自动调整where条件的顺序
 bool Planner::get_index_cols(std::string tab_name, std::vector<Condition> curr_conds, std::vector<std::string>& index_col_names) {
     index_col_names.clear();
-    for(auto& cond: curr_conds) {
-        if(cond.is_rhs_val && cond.op == OP_EQ && cond.lhs_col.tab_name.compare(tab_name) == 0)
-            index_col_names.push_back(cond.lhs_col.col_name);
-    }
     TabMeta& tab = sm_manager_->db_.get_table(tab_name);
-    if(tab.is_index(index_col_names)) return true;
-    return false;
+
+    std::vector<std::string> best_match;
+    for (auto &index : tab.indexes) {
+        std::vector<std::string> matched;
+        for (auto &index_col : index.cols) {
+            bool found = false;
+            for (auto &cond : curr_conds) {
+                if (cond.is_rhs_val && cond.lhs_col.col_name == index_col.name && cond.lhs_col.tab_name == tab_name) {
+                    matched.push_back(index_col.name);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) break;
+        }
+        if (matched.size() > best_match.size()) {
+            best_match = matched;
+        }
+    }
+
+    if (best_match.empty()) return false;
+    index_col_names = best_match;
+    return true;
 }
 
 /**

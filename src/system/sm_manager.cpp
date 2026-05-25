@@ -69,6 +69,10 @@ void SmManager::open_db(const std::string& db_name) {
     ifs >> db_;
     for (auto &entry : db_.tabs_) {
         fhs_.emplace(entry.first, rm_manager_->open_file(entry.first));
+        for (auto &index : entry.second.indexes) {
+            std::string ix_name = ix_manager_->get_index_name(entry.first, index.cols);
+            ihs_.emplace(ix_name, ix_manager_->open_index(entry.first, index.cols));
+        }
     }
     if (chdir("..") < 0) {
         throw UnixError();
@@ -85,6 +89,10 @@ void SmManager::close_db() {
         rm_manager_->close_file(entry.second.get());
     }
     fhs_.clear();
+    for (auto &entry : ihs_) {
+        ix_manager_->close_index(entry.second.get());
+    }
+    ihs_.clear();
     flush_meta();
 }
 
@@ -150,6 +158,18 @@ void SmManager::drop_table(const std::string& tab_name, Context* context) {
     if (it == fhs_.end()) {
         throw TableNotFoundError(tab_name);
     }
+
+    TabMeta &tab = db_.get_table(tab_name);
+    for (auto &index : tab.indexes) {
+        std::string ix_name = ix_manager_->get_index_name(tab_name, index.cols);
+        auto ih_it = ihs_.find(ix_name);
+        if (ih_it != ihs_.end()) {
+            ix_manager_->close_index(ih_it->second.get());
+            ihs_.erase(ih_it);
+        }
+        ix_manager_->destroy_index(tab_name, index.cols);
+    }
+
     rm_manager_->close_file(it->second.get());
     fhs_.erase(it);
     rm_manager_->destroy_file(tab_name);
@@ -158,13 +178,93 @@ void SmManager::drop_table(const std::string& tab_name, Context* context) {
 }
 
 void SmManager::create_index(const std::string& tab_name, const std::vector<std::string>& col_names, Context* context) {
-    
+    TabMeta &tab = db_.get_table(tab_name);
+
+    if (tab.is_index(col_names)) {
+        throw RMDBError("Index already exists");
+    }
+
+    std::vector<ColMeta> index_cols;
+    for (auto &col_name : col_names) {
+        auto col_it = tab.get_col(col_name);
+        index_cols.push_back(*col_it);
+    }
+
+    ix_manager_->create_index(tab_name, index_cols);
+
+    IndexMeta index_meta;
+    index_meta.tab_name = tab_name;
+    index_meta.col_num = (int)col_names.size();
+    index_meta.col_tot_len = 0;
+    index_meta.cols = index_cols;
+    for (auto &col : index_cols) {
+        index_meta.col_tot_len += col.len;
+    }
+    tab.indexes.push_back(index_meta);
+
+    auto ih = ix_manager_->open_index(tab_name, index_cols);
+    auto fh = fhs_.at(tab_name).get();
+    char key_buf[index_meta.col_tot_len];
+
+    for (RmScan scan(fh); !scan.is_end(); scan.next()) {
+        auto rid = scan.rid();
+        auto rec = fh->get_record(rid, context);
+        int offset = 0;
+        for (auto &col : index_cols) {
+            memcpy(key_buf + offset, rec->data + col.offset, col.len);
+            offset += col.len;
+        }
+        ih->insert_entry(key_buf, rid, nullptr);
+    }
+
+    std::string ix_name = ix_manager_->get_index_name(tab_name, index_cols);
+    ihs_[ix_name] = std::move(ih);
+
+    flush_meta();
 }
 
 void SmManager::drop_index(const std::string& tab_name, const std::vector<std::string>& col_names, Context* context) {
-    
+    TabMeta &tab = db_.get_table(tab_name);
+
+    auto index_it = tab.get_index_meta(col_names);
+    std::vector<ColMeta> index_cols = index_it->cols;
+
+    std::string ix_name = ix_manager_->get_index_name(tab_name, index_cols);
+    auto ih_it = ihs_.find(ix_name);
+    if (ih_it != ihs_.end()) {
+        ix_manager_->close_index(ih_it->second.get());
+        ihs_.erase(ih_it);
+    }
+
+    ix_manager_->destroy_index(tab_name, index_cols);
+    tab.indexes.erase(index_it);
+    flush_meta();
 }
 
 void SmManager::drop_index(const std::string& tab_name, const std::vector<ColMeta>& cols, Context* context) {
-    
+    TabMeta &tab = db_.get_table(tab_name);
+
+    std::vector<std::string> col_names;
+    for (auto &col : cols) {
+        col_names.push_back(col.name);
+    }
+    drop_index(tab_name, col_names, context);
+}
+
+void SmManager::show_index(const std::string& tab_name, Context* context) {
+    TabMeta &tab = db_.get_table(tab_name);
+
+    std::fstream outfile;
+    outfile.open("output.txt", std::ios::out | std::ios::app);
+
+    for (auto &index : tab.indexes) {
+        outfile << "| " << tab_name << " | unique | (";
+        for (size_t i = 0; i < index.cols.size(); i++) {
+            if (i > 0) outfile << ",";
+            outfile << index.cols[i].name;
+        }
+        outfile << ") |\n";
+    }
+
+    outfile.close();
 }

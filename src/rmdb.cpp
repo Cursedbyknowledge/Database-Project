@@ -117,53 +117,76 @@ void *client_handler(void *sock_fd) {
         Context *context = new Context(lock_manager.get(), log_manager.get(), nullptr, data_send, &offset);
         SetTransaction(&txn_id, context);
 
+        bool show_index_handled = false;
         bool finish_analyze = false;
         pthread_mutex_lock(buffer_mutex);
-        YY_BUFFER_STATE buf = yy_scan_string(data_recv);
-        if (yyparse() == 0) {
-            if (ast::parse_tree != nullptr) {
-                try {
-                    std::shared_ptr<Query> query = analyze->do_analyze(ast::parse_tree);
-                    yy_delete_buffer(buf);
-                    finish_analyze = true;
-                    pthread_mutex_unlock(buffer_mutex);
-                    std::shared_ptr<Plan> plan = optimizer->plan_query(query, context);
-                    std::shared_ptr<PortalStmt> portalStmt = portal->start(plan, context);
-                    portal->run(portalStmt, ql_manager.get(), &txn_id, context);
-                    portal->drop();
-                } catch (TransactionAbortException &e) {
-                    std::string str = "abort\n";
-                    memcpy(data_send, str.c_str(), str.length());
-                    data_send[str.length()] = '\0';
-                    offset = str.length();
 
-                    txn_manager->abort(context->txn_, log_manager.get());
-                    context->txn_ = nullptr;
-                    txn_id = INVALID_TXN_ID;
-                    std::cout << e.GetInfo() << std::endl;
+        if (strncmp(data_recv, "show index from ", 16) == 0) {
+            std::string sql(data_recv);
+            size_t start = 16;
+            while (start < sql.size() && isspace((unsigned char)sql[start])) start++;
+            size_t end = start;
+            while (end < sql.size() && !isspace((unsigned char)sql[end]) && sql[end] != ';') end++;
+            std::string tab_name = sql.substr(start, end - start);
+            pthread_mutex_unlock(buffer_mutex);
+            show_index_handled = true;
 
-                    std::fstream outfile;
-                    outfile.open("output.txt", std::ios::out | std::ios::app);
-                    outfile << str;
-                    outfile.close();
-                } catch (RMDBError &e) {
-                    std::cerr << e.what() << std::endl;
+            try {
+                sm_manager->show_index(tab_name, context);
+            } catch (RMDBError &e) {
+                std::cerr << e.what() << std::endl;
+                memcpy(data_send, e.what(), e.get_msg_len());
+                data_send[e.get_msg_len()] = '\n';
+                data_send[e.get_msg_len() + 1] = '\0';
+                offset = e.get_msg_len() + 1;
+            }
+        } else {
+            YY_BUFFER_STATE buf = yy_scan_string(data_recv);
+            if (yyparse() == 0) {
+                if (ast::parse_tree != nullptr) {
+                    try {
+                        std::shared_ptr<Query> query = analyze->do_analyze(ast::parse_tree);
+                        yy_delete_buffer(buf);
+                        finish_analyze = true;
+                        pthread_mutex_unlock(buffer_mutex);
+                        std::shared_ptr<Plan> plan = optimizer->plan_query(query, context);
+                        std::shared_ptr<PortalStmt> portalStmt = portal->start(plan, context);
+                        portal->run(portalStmt, ql_manager.get(), &txn_id, context);
+                        portal->drop();
+                    } catch (TransactionAbortException &e) {
+                        std::string str = "abort\n";
+                        memcpy(data_send, str.c_str(), str.length());
+                        data_send[str.length()] = '\0';
+                        offset = str.length();
 
-                    memcpy(data_send, e.what(), e.get_msg_len());
-                    data_send[e.get_msg_len()] = '\n';
-                    data_send[e.get_msg_len() + 1] = '\0';
-                    offset = e.get_msg_len() + 1;
+                        txn_manager->abort(context->txn_, log_manager.get());
+                        context->txn_ = nullptr;
+                        txn_id = INVALID_TXN_ID;
+                        std::cout << e.GetInfo() << std::endl;
 
-                    std::fstream outfile;
-                    outfile.open("output.txt",std::ios::out | std::ios::app);
-                    outfile << "failure\n";
-                    outfile.close();
+                        std::fstream outfile;
+                        outfile.open("output.txt", std::ios::out | std::ios::app);
+                        outfile << str;
+                        outfile.close();
+                    } catch (RMDBError &e) {
+                        std::cerr << e.what() << std::endl;
+
+                        memcpy(data_send, e.what(), e.get_msg_len());
+                        data_send[e.get_msg_len()] = '\n';
+                        data_send[e.get_msg_len() + 1] = '\0';
+                        offset = e.get_msg_len() + 1;
+
+                        std::fstream outfile;
+                        outfile.open("output.txt",std::ios::out | std::ios::app);
+                        outfile << "failure\n";
+                        outfile.close();
+                    }
                 }
             }
-        }
-        if(finish_analyze == false) {
-            yy_delete_buffer(buf);
-            pthread_mutex_unlock(buffer_mutex);
+            if(finish_analyze == false) {
+                yy_delete_buffer(buf);
+                pthread_mutex_unlock(buffer_mutex);
+            }
         }
         if (write(fd, data_send, offset + 1) == -1) {
             break;
