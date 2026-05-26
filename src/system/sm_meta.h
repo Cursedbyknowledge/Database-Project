@@ -72,6 +72,7 @@ struct TabMeta {
     TabMeta(const TabMeta &other) {
         name = other.name;
         for(auto col : other.cols) cols.push_back(col);
+        for(auto index : other.indexes) indexes.push_back(index);
     }
 
     bool is_col(const std::string &col_name) const {
