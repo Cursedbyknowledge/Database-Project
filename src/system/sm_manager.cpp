@@ -75,8 +75,12 @@ void SmManager::open_db(const std::string& db_name) {
             if (!disk_manager_->is_file(ix_name)) {
                 it = indexes.erase(it);
             } else {
-                ihs_.emplace(ix_name, ix_manager_->open_index(entry.first, it->cols));
-                ++it;
+                try {
+                    ihs_.emplace(ix_name, ix_manager_->open_index(entry.first, it->cols));
+                    ++it;
+                } catch (...) {
+                    it = indexes.erase(it);
+                }
             }
         }
     }
@@ -164,18 +168,22 @@ void SmManager::drop_table(const std::string& tab_name, Context* context) {
     if (it == fhs_.end()) {
         throw TableNotFoundError(tab_name);
     }
-
-    TabMeta &tab = db_.get_table(tab_name);
-    for (auto &index : tab.indexes) {
-        std::string ix_name = ix_manager_->get_index_name(tab_name, index.cols);
-        auto ih_it = ihs_.find(ix_name);
-        if (ih_it != ihs_.end()) {
-            ix_manager_->close_index(ih_it->second.get());
-            ihs_.erase(ih_it);
+    try {
+        auto tab_it = db_.tabs_.find(tab_name);
+        if (tab_it != db_.tabs_.end()) {
+            for (auto &index : tab_it->second.indexes) {
+                std::string ix_name = ix_manager_->get_index_name(tab_name, index.cols);
+                try {
+                    auto ih_it = ihs_.find(ix_name);
+                    if (ih_it != ihs_.end()) {
+                        ix_manager_->close_index(ih_it->second.get());
+                        ihs_.erase(ih_it);
+                    }
+                    ix_manager_->destroy_index(tab_name, index.cols);
+                } catch (...) {}
+            }
         }
-        ix_manager_->destroy_index(tab_name, index.cols);
-    }
-
+    } catch (...) {}
     rm_manager_->close_file(it->second.get());
     fhs_.erase(it);
     rm_manager_->destroy_file(tab_name);
@@ -208,23 +216,29 @@ void SmManager::create_index(const std::string& tab_name, const std::vector<std:
     }
     tab.indexes.push_back(index_meta);
 
-    auto ih = ix_manager_->open_index(tab_name, index_cols);
-    auto fh = fhs_.at(tab_name).get();
-    char key_buf[index_meta.col_tot_len];
+    try {
+        auto ih = ix_manager_->open_index(tab_name, index_cols);
+        auto fh = fhs_.at(tab_name).get();
+        char key_buf[index_meta.col_tot_len];
 
-    for (RmScan scan(fh); !scan.is_end(); scan.next()) {
-        auto rid = scan.rid();
-        auto rec = fh->get_record(rid, context);
-        int offset = 0;
-        for (auto &col : index_cols) {
-            memcpy(key_buf + offset, rec->data + col.offset, col.len);
-            offset += col.len;
+        for (RmScan scan(fh); !scan.is_end(); scan.next()) {
+            auto rid = scan.rid();
+            auto rec = fh->get_record(rid, context);
+            int offset = 0;
+            for (auto &col : index_cols) {
+                memcpy(key_buf + offset, rec->data + col.offset, col.len);
+                offset += col.len;
+            }
+            ih->insert_entry(key_buf, rid, nullptr);
         }
-        ih->insert_entry(key_buf, rid, nullptr);
-    }
 
-    std::string ix_name = ix_manager_->get_index_name(tab_name, index_cols);
-    ihs_[ix_name] = std::move(ih);
+        std::string ix_name = ix_manager_->get_index_name(tab_name, index_cols);
+        ihs_[ix_name] = std::move(ih);
+    } catch (...) {
+        ix_manager_->destroy_index(tab_name, index_cols);
+        tab.indexes.pop_back();
+        throw;
+    }
 
     flush_meta();
 }
