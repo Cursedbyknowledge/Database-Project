@@ -181,23 +181,27 @@ class IndexScanExecutor : public AbstractExecutor {
         Iid upper = ih_->upper_bound(high_key.data());
 
         scan_ = std::make_unique<IxScan>(ih_, lower, upper, sm_manager_->get_bpm());
-        rid_ = scan_->rid();
+        if (scan_->is_end()) return;
 
+        rid_ = scan_->rid();
         while (!scan_->is_end()) {
             auto rec = fh_->get_record(rid_, context_);
             if (eval_conds(rec->data)) return;
             scan_->next();
+            if (scan_->is_end()) return;
             rid_ = scan_->rid();
         }
     }
 
     void nextTuple() override {
         scan_->next();
+        if (scan_->is_end()) return;
         rid_ = scan_->rid();
         while (!scan_->is_end()) {
             auto rec = fh_->get_record(rid_, context_);
             if (eval_conds(rec->data)) return;
             scan_->next();
+            if (scan_->is_end()) return;
             rid_ = scan_->rid();
         }
     }
