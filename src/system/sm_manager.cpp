@@ -69,9 +69,15 @@ void SmManager::open_db(const std::string& db_name) {
     ifs >> db_;
     for (auto &entry : db_.tabs_) {
         fhs_.emplace(entry.first, rm_manager_->open_file(entry.first));
-        for (auto &index : entry.second.indexes) {
-            std::string ix_name = ix_manager_->get_index_name(entry.first, index.cols);
-            ihs_.emplace(ix_name, ix_manager_->open_index(entry.first, index.cols));
+        auto &indexes = entry.second.indexes;
+        for (auto it = indexes.begin(); it != indexes.end(); ) {
+            std::string ix_name = ix_manager_->get_index_name(entry.first, it->cols);
+            if (!disk_manager_->is_file(ix_name)) {
+                it = indexes.erase(it);
+            } else {
+                ihs_.emplace(ix_name, ix_manager_->open_index(entry.first, it->cols));
+                ++it;
+            }
         }
     }
     if (chdir("..") < 0) {
