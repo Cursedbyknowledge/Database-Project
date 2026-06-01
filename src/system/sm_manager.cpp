@@ -93,12 +93,13 @@ void SmManager::open_db(const std::string& db_name) {
     for (auto &entry : db_.tabs_) {
         fhs_.emplace(entry.first, rm_manager_->open_file(entry.first));
     }
-    // 同时打开所有索引文件
+    // 同时打开所有索引文件（使用 operator[] 覆盖，而非 emplace 忽略已有 key）
+    ihs_.clear();
     for (auto &tab_entry : db_.tabs_) {
         for (auto &index : tab_entry.second.indexes) {
             std::string ix_name = ix_manager_->get_index_name(tab_entry.first, index.cols);
             if (ix_manager_->exists(tab_entry.first, index.cols)) {
-                ihs_.emplace(ix_name, ix_manager_->open_index(tab_entry.first, index.cols));
+                ihs_[ix_name] = ix_manager_->open_index(tab_entry.first, index.cols);
             }
         }
     }
@@ -124,6 +125,11 @@ void SmManager::close_db() {
         rm_manager_->close_file(entry.second.get());
     }
     fhs_.clear();
+    // 同时关闭所有索引文件
+    for (auto &entry : ihs_) {
+        ix_manager_->close_index(entry.second.get());
+    }
+    ihs_.clear();
     flush_meta();
 }
 
