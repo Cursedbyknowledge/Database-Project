@@ -22,33 +22,64 @@ See the Mulan PSL v2 for more details. */
 #include "index/ix.h"
 #include "record_printer.h"
 
-// 目前的索引匹配规则为：完全匹配索引字段，且全部为单点查询，不会自动调整where条件的顺序
+// 使用最左前缀匹配原则：匹配索引列，第一个非等值条件处停止（范围查询），支持条件自动重排序
 bool Planner::get_index_cols(std::string tab_name, std::vector<Condition> curr_conds, std::vector<std::string>& index_col_names) {
     index_col_names.clear();
     TabMeta& tab = sm_manager_->db_.get_table(tab_name);
 
-    std::vector<std::string> best_match;
-    for (auto &index : tab.indexes) {
-        std::vector<std::string> matched;
-        for (auto &index_col : index.cols) {
-            bool found = false;
-            for (auto &cond : curr_conds) {
-                if (cond.is_rhs_val && cond.lhs_col.col_name == index_col.name && cond.lhs_col.tab_name == tab_name) {
-                    matched.push_back(index_col.name);
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) break;
-        }
-        if (matched.size() > best_match.size()) {
-            best_match = matched;
+    // 筛选出针对该表的列值条件
+    std::vector<Condition> table_conds;
+    for (auto& cond : curr_conds) {
+        if (cond.is_rhs_val && cond.lhs_col.tab_name.compare(tab_name) == 0) {
+            table_conds.push_back(cond);
         }
     }
+    if (table_conds.empty()) return false;
 
-    if (best_match.empty()) return false;
-    index_col_names = best_match;
-    return true;
+    // 遍历表上所有索引，找到最佳匹配
+    for (auto& index : tab.indexes) {
+        std::vector<std::string> matched_cols;
+        bool can_use = true;
+        bool found_range = false;
+
+        for (auto& idx_col : index.cols) {
+            // 在 table_conds 中查找匹配该列的等值条件
+            auto it = std::find_if(table_conds.begin(), table_conds.end(),
+                [&](const Condition& c) {
+                    return c.lhs_col.col_name == idx_col.name && c.op == OP_EQ;
+                });
+
+            if (it != table_conds.end()) {
+                // 找到等值条件
+                if (!found_range) {
+                    matched_cols.push_back(idx_col.name);
+                }
+            } else if (!found_range) {
+                // 检查是否有范围条件（>, <, >=, <=）
+                auto range_it = std::find_if(table_conds.begin(), table_conds.end(),
+                    [&](const Condition& c) {
+                        return c.lhs_col.col_name == idx_col.name &&
+                               (c.op == OP_LT || c.op == OP_GT || c.op == OP_LE || c.op == OP_GE);
+                    });
+                if (range_it != table_conds.end()) {
+                    matched_cols.push_back(idx_col.name);
+                    found_range = true;
+                } else {
+                    // 该列没有条件也不能跳过（最左前缀原则）
+                    break;
+                }
+            } else {
+                // 已经遇到范围查询，后续列不能再匹配
+                break;
+            }
+        }
+
+        if (!matched_cols.empty()) {
+            index_col_names = matched_cols;
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
@@ -393,6 +424,8 @@ std::shared_ptr<Plan> Planner::do_planner(std::shared_ptr<Query> query, Context 
         plannerRoot = std::make_shared<DMLPlan>(T_Update, table_scan_executors, x->tab_name,
                                                      std::vector<Value>(), query->conds, 
                                                      query->set_clauses);
+    } else if (auto x = std::dynamic_pointer_cast<ast::ShowIndex>(query->parse)) {
+        plannerRoot = std::make_shared<OtherPlan>(T_ShowIndex, x->tab_name);
     } else if (auto x = std::dynamic_pointer_cast<ast::SelectStmt>(query->parse)) {
 
         std::shared_ptr<plannerInfo> root = std::make_shared<plannerInfo>(x);

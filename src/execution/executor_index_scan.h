@@ -28,7 +28,6 @@ class IndexScanExecutor : public AbstractExecutor {
 
     std::vector<std::string> index_col_names_;
     IndexMeta index_meta_;
-    IxIndexHandle *ih_;
 
     Rid rid_;
     std::unique_ptr<RecScan> scan_;
@@ -86,59 +85,6 @@ class IndexScanExecutor : public AbstractExecutor {
         return true;
     }
 
-    const Condition* find_cond_for_col(const std::string& col_name) {
-        for (auto &cond : conds_) {
-            if (cond.is_rhs_val && cond.lhs_col.col_name == col_name) return &cond;
-        }
-        return nullptr;
-    }
-
-    void build_scan_key(char* key_buf, bool is_low) {
-        int offset = 0;
-        for (auto &idx_col : index_meta_.cols) {
-            const Condition* cond = find_cond_for_col(idx_col.name);
-            if (cond != nullptr) {
-                Value val = cond->rhs_val;
-                if (val.type != idx_col.type) {
-                    if (idx_col.type == TYPE_FLOAT && val.type == TYPE_INT) {
-                        val.set_float((float)val.int_val);
-                    } else if (idx_col.type == TYPE_INT && val.type == TYPE_FLOAT) {
-                        val.set_int((int)val.float_val);
-                    }
-                }
-                val.init_raw(idx_col.len);
-                memcpy(key_buf + offset, val.raw->data, idx_col.len);
-
-                if (is_low && cond->op == OP_GT) {
-                    if (idx_col.type == TYPE_INT) {
-                        int v = *(int*)(key_buf + offset);
-                        v++;
-                        memcpy(key_buf + offset, &v, sizeof(int));
-                    }
-                }
-
-                if (!is_low && (cond->op == OP_LT)) {
-                    if (idx_col.type == TYPE_INT) {
-                        int v = *(int*)(key_buf + offset);
-                        v--;
-                        memcpy(key_buf + offset, &v, sizeof(int));
-                    }
-                    offset += idx_col.len;
-                    memset(key_buf + offset, 0xFF, index_meta_.col_tot_len - offset);
-                    return;
-                }
-            } else {
-                if (is_low) {
-                    memset(key_buf + offset, 0, index_meta_.col_tot_len - offset);
-                } else {
-                    memset(key_buf + offset, 0xFF, index_meta_.col_tot_len - offset);
-                }
-                return;
-            }
-            offset += idx_col.len;
-        }
-    }
-
    public:
     IndexScanExecutor(SmManager *sm_manager, std::string tab_name, std::vector<Condition> conds, std::vector<std::string> index_col_names,
                     Context *context) {
@@ -147,15 +93,11 @@ class IndexScanExecutor : public AbstractExecutor {
         tab_name_ = std::move(tab_name);
         tab_ = sm_manager_->db_.get_table(tab_name_);
         conds_ = std::move(conds);
-        index_col_names_ = index_col_names;
+        index_col_names_ = index_col_names; 
         index_meta_ = *(tab_.get_index_meta(index_col_names_));
         fh_ = sm_manager_->fhs_.at(tab_name_).get();
         cols_ = tab_.cols;
         len_ = cols_.back().offset + cols_.back().len;
-
-        std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index_col_names_);
-        ih_ = sm_manager_->ihs_.at(ix_name).get();
-
         std::map<CompOp, CompOp> swap_op = {
             {OP_EQ, OP_EQ}, {OP_NE, OP_NE}, {OP_LT, OP_GT}, {OP_GT, OP_LT}, {OP_LE, OP_GE}, {OP_GE, OP_LE},
         };
@@ -171,37 +113,23 @@ class IndexScanExecutor : public AbstractExecutor {
     }
 
     void beginTuple() override {
-        std::vector<char> low_key(index_meta_.col_tot_len, 0);
-        std::vector<char> high_key(index_meta_.col_tot_len, static_cast<char>(0xFF));
-
-        build_scan_key(low_key.data(), true);
-        build_scan_key(high_key.data(), false);
-
-        Iid lower = ih_->lower_bound(low_key.data());
-        Iid upper = ih_->upper_bound(high_key.data());
-
-        scan_ = std::make_unique<IxScan>(ih_, lower, upper, sm_manager_->get_bpm());
-        if (scan_->is_end()) return;
-
+        scan_ = std::make_unique<RmScan>(fh_);
         rid_ = scan_->rid();
         while (!scan_->is_end()) {
             auto rec = fh_->get_record(rid_, context_);
             if (eval_conds(rec->data)) return;
             scan_->next();
-            if (scan_->is_end()) return;
             rid_ = scan_->rid();
         }
     }
 
     void nextTuple() override {
         scan_->next();
-        if (scan_->is_end()) return;
         rid_ = scan_->rid();
         while (!scan_->is_end()) {
             auto rec = fh_->get_record(rid_, context_);
             if (eval_conds(rec->data)) return;
             scan_->next();
-            if (scan_->is_end()) return;
             rid_ = scan_->rid();
         }
     }

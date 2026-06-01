@@ -41,83 +41,13 @@ class UpdateExecutor : public AbstractExecutor {
     std::unique_ptr<RmRecord> Next() override {
         for (auto &rid : rids_) {
             auto rec = fh_->get_record(rid, context_);
-
-            for (size_t i = 0; i < tab_.indexes.size(); ++i) {
-                auto& index = tab_.indexes[i];
-                std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);
-                auto ih = sm_manager_->ihs_.at(ix_name).get();
-
-                char* old_key = new char[index.col_tot_len];
-                char* new_key = new char[index.col_tot_len];
-                int offset = 0;
-                for (size_t j = 0; j < index.col_num; ++j) {
-                    memcpy(old_key + offset, rec->data + index.cols[j].offset, index.cols[j].len);
-                    offset += index.cols[j].len;
-                }
-
-                auto new_rec_data = std::make_unique<char[]>(fh_->get_file_hdr().record_size);
-                memcpy(new_rec_data.get(), rec->data, fh_->get_file_hdr().record_size);
-                for (auto &set_clause : set_clauses_) {
-                    auto col_meta = tab_.get_col(set_clause.lhs.col_name);
-                    set_clause.rhs.init_raw(col_meta->len);
-                    memcpy(new_rec_data.get() + col_meta->offset, set_clause.rhs.raw->data, col_meta->len);
-                    if (set_clause.rhs.raw) set_clause.rhs.raw.reset();
-                }
-
-                offset = 0;
-                for (size_t j = 0; j < index.col_num; ++j) {
-                    memcpy(new_key + offset, new_rec_data.get() + index.cols[j].offset, index.cols[j].len);
-                    offset += index.cols[j].len;
-                }
-
-                if (memcmp(old_key, new_key, index.col_tot_len) != 0) {
-                    std::vector<Rid> check_result;
-                    if (ih->get_value(new_key, &check_result, context_->txn_)) {
-                        delete[] old_key;
-                        delete[] new_key;
-                        throw RMDBError("Duplicate entry for unique index");
-                    }
-                }
-                delete[] old_key;
-                delete[] new_key;
-            }
-
-            for (size_t i = 0; i < tab_.indexes.size(); ++i) {
-                auto& index = tab_.indexes[i];
-                std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);
-                auto ih = sm_manager_->ihs_.at(ix_name).get();
-                char* old_key = new char[index.col_tot_len];
-                int offset = 0;
-                for (size_t j = 0; j < index.col_num; ++j) {
-                    memcpy(old_key + offset, rec->data + index.cols[j].offset, index.cols[j].len);
-                    offset += index.cols[j].len;
-                }
-                ih->delete_entry(old_key, context_->txn_);
-                delete[] old_key;
-            }
-
             for (auto &set_clause : set_clauses_) {
                 auto col_meta = tab_.get_col(set_clause.lhs.col_name);
                 set_clause.rhs.init_raw(col_meta->len);
                 memcpy(rec->data + col_meta->offset, set_clause.rhs.raw->data, col_meta->len);
                 if (set_clause.rhs.raw) set_clause.rhs.raw.reset();
             }
-
             fh_->update_record(rid, rec->data, context_);
-
-            for (size_t i = 0; i < tab_.indexes.size(); ++i) {
-                auto& index = tab_.indexes[i];
-                std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);
-                auto ih = sm_manager_->ihs_.at(ix_name).get();
-                char* new_key = new char[index.col_tot_len];
-                int offset = 0;
-                for (size_t j = 0; j < index.col_num; ++j) {
-                    memcpy(new_key + offset, rec->data + index.cols[j].offset, index.cols[j].len);
-                    offset += index.cols[j].len;
-                }
-                ih->insert_entry(new_key, rid, context_->txn_);
-                delete[] new_key;
-            }
         }
         return nullptr;
     }

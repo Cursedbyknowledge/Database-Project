@@ -47,6 +47,12 @@ struct Help : public TreeNode {
 struct ShowTables : public TreeNode {
 };
 
+struct ShowIndex : public TreeNode {
+    std::string tab_name;
+
+    ShowIndex(std::string tab_name_) : tab_name(std::move(tab_name_)) {}
+};
+
 struct TxnBegin : public TreeNode {
 };
 
@@ -111,12 +117,6 @@ struct DropIndex : public TreeNode {
 
     DropIndex(std::string tab_name_, std::vector<std::string> col_names_) :
             tab_name(std::move(tab_name_)), col_names(std::move(col_names_)) {}
-};
-
-struct ShowIndex : public TreeNode {
-    std::string tab_name;
-
-    ShowIndex(std::string tab_name_) : tab_name(std::move(tab_name_)) {}
 };
 
 struct Expr : public TreeNode {
