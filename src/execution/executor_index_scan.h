@@ -168,8 +168,7 @@ class IndexScanExecutor : public AbstractExecutor {
         len_ = cols_.back().offset + cols_.back().len;
 
         // 获取 B+ 树索引句柄
-        std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index_meta_.cols);
-        ih_ = sm_manager_->ihs_.at(ix_name).get();
+        ih_ = sm_manager_->get_ih(tab_name_, index_meta_.cols);
 
         // 规范化条件：确保 lhs_col 指向本表
         std::map<CompOp, CompOp> swap_op = {

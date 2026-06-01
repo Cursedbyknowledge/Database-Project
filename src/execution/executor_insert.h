@@ -57,8 +57,7 @@ class InsertExecutor : public AbstractExecutor {
 
         for (size_t i = 0; i < tab_.indexes.size(); ++i) {
             auto& index = tab_.indexes[i];
-            std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);
-            auto ih = sm_manager_->ihs_.at(ix_name).get();
+            auto ih = sm_manager_->get_ih(tab_name_, index.cols);
             char* key = new char[index.col_tot_len];
             int offset = 0;
             for (size_t j = 0; j < index.col_num; ++j) {
@@ -77,8 +76,7 @@ class InsertExecutor : public AbstractExecutor {
 
         for (size_t i = 0; i < tab_.indexes.size(); ++i) {
             auto& index = tab_.indexes[i];
-            std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);
-            auto ih = sm_manager_->ihs_.at(ix_name).get();
+            auto ih = sm_manager_->get_ih(tab_name_, index.cols);
             char* key = new char[index.col_tot_len];
             int offset = 0;
             for (size_t j = 0; j < index.col_num; ++j) {

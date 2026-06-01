@@ -65,8 +65,7 @@ class UpdateExecutor : public AbstractExecutor {
 
             // ---- 阶段 2: 检查唯一性约束（在删除旧条目之前） ----
             for (auto &index : tab_.indexes) {
-                std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);
-                auto ih = sm_manager_->ihs_.at(ix_name).get();
+                auto ih = sm_manager_->get_ih(tab_name_, index.cols);
 
                 char *new_key = new char[index.col_tot_len];
                 build_index_key(new_key, index, new_data.data());
@@ -91,8 +90,7 @@ class UpdateExecutor : public AbstractExecutor {
 
             // ---- 阶段 3: 删除旧的索引条目 ----
             for (auto &index : tab_.indexes) {
-                std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);
-                auto ih = sm_manager_->ihs_.at(ix_name).get();
+                auto ih = sm_manager_->get_ih(tab_name_, index.cols);
 
                 char *old_key = new char[index.col_tot_len];
                 build_index_key(old_key, index, rec->data);
@@ -102,8 +100,7 @@ class UpdateExecutor : public AbstractExecutor {
 
             // ---- 阶段 4: 插入新的索引条目 ----
             for (auto &index : tab_.indexes) {
-                std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);
-                auto ih = sm_manager_->ihs_.at(ix_name).get();
+                auto ih = sm_manager_->get_ih(tab_name_, index.cols);
 
                 char *new_key = new char[index.col_tot_len];
                 build_index_key(new_key, index, new_data.data());

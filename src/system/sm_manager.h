@@ -79,4 +79,14 @@ class SmManager {
     void drop_index(const std::string& tab_name, const std::vector<ColMeta>& col_names, Context* context);
 
     void show_index_from(const std::string& tab_name, Context* context);
+
+    // 安全获取索引句柄（避免 ihs_.at() 抛 std::out_of_range 导致服务器崩溃）
+    IxIndexHandle* get_ih(const std::string& tab_name, const std::vector<ColMeta>& cols) {
+        std::string ix_name = ix_manager_->get_index_name(tab_name, cols);
+        auto it = ihs_.find(ix_name);
+        if (it == ihs_.end()) {
+            throw RMDBError("Index handle not found: " + ix_name + ". The index may not be opened.");
+        }
+        return it->second.get();
+    }
 };

@@ -43,8 +43,7 @@ class DeleteExecutor : public AbstractExecutor {
 
             // ---- 阶段 1: 删除索引中的条目 ----
             for (auto &index : tab_.indexes) {
-                std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);
-                auto ih = sm_manager_->ihs_.at(ix_name).get();
+                auto ih = sm_manager_->get_ih(tab_name_, index.cols);
                 
                 char *key = new char[index.col_tot_len];
                 int offset = 0;
