@@ -187,21 +187,18 @@ class IndexScanExecutor : public AbstractExecutor {
 
     void beginTuple() override {
         use_fallback_ = false;
+        if (!ih_) { begin_fallback(); return; }
         try {
             int col_tot_len = index_meta_.col_tot_len;
             char *low_key = new char[col_tot_len];
             char *high_key = new char[col_tot_len];
             bool needs_upper = false;
             build_scan_keys(low_key, high_key, needs_upper);
-
             Iid lower = ih_->lower_bound(low_key);
             Iid upper = needs_upper ? ih_->upper_bound(high_key) : ih_->leaf_end();
-
             delete[] low_key;
             delete[] high_key;
-
             scan_ = std::make_unique<IxScan>(ih_, lower, upper, sm_manager_->get_bpm());
-
             if (!scan_->is_end()) {
                 rid_ = scan_->rid();
                 while (!scan_->is_end()) {
@@ -212,31 +209,13 @@ class IndexScanExecutor : public AbstractExecutor {
                 }
             }
         } catch (...) {
-            // B+ 树扫描异常（空树/失效 Rid/其他），回退到全表扫描
             use_fallback_ = true;
-            scan_ = std::make_unique<RmScan>(fh_);
-            rid_ = scan_->rid();
-            while (!scan_->is_end()) {
-                auto rec = fh_->get_record(rid_, context_);
-                if (eval_conds(rec->data)) return;
-                scan_->next();
-                rid_ = scan_->rid();
-            }
+            begin_fallback();
         }
     }
 
     void nextTuple() override {
-        if (use_fallback_) {
-            scan_->next();
-            rid_ = scan_->rid();
-            while (!scan_->is_end()) {
-                auto rec = fh_->get_record(rid_, context_);
-                if (eval_conds(rec->data)) return;
-                scan_->next();
-                rid_ = scan_->rid();
-            }
-            return;
-        }
+        if (use_fallback_ || !ih_) { next_fallback(); return; }
         scan_->next();
         if (!scan_->is_end()) {
             rid_ = scan_->rid();
@@ -249,7 +228,7 @@ class IndexScanExecutor : public AbstractExecutor {
         }
     }
 
-    bool is_end() const override { return scan_->is_end(); }
+    bool is_end() const override { return scan_ ? scan_->is_end() : true; }
 
     std::unique_ptr<RmRecord> Next() override { return fh_->get_record(rid_, context_); }
 
@@ -258,4 +237,27 @@ class IndexScanExecutor : public AbstractExecutor {
     const std::vector<ColMeta> &cols() const override { return cols_; }
 
     Rid &rid() override { return rid_; }
+
+   private:
+    void begin_fallback() {
+        scan_ = std::make_unique<RmScan>(fh_);
+        rid_ = scan_->rid();
+        while (!scan_->is_end()) {
+            auto rec = fh_->get_record(rid_, context_);
+            if (eval_conds(rec->data)) return;
+            scan_->next();
+            rid_ = scan_->rid();
+        }
+    }
+
+    void next_fallback() {
+        scan_->next();
+        rid_ = scan_->rid();
+        while (!scan_->is_end()) {
+            auto rec = fh_->get_record(rid_, context_);
+            if (eval_conds(rec->data)) return;
+            scan_->next();
+            rid_ = scan_->rid();
+        }
+    }
 };

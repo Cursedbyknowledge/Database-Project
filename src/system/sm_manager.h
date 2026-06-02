@@ -80,20 +80,24 @@ class SmManager {
 
     void show_index_from(const std::string& tab_name, Context* context);
 
-    // 安全获取索引句柄，找不到则懒加载打开（避免 open_db 遗漏导致的崩溃）
+    // 安全获取索引句柄，找不到或打不开返回 nullptr（调用方自行处理）
     IxIndexHandle* get_ih(const std::string& tab_name, const std::vector<ColMeta>& cols) {
         std::string ix_name = ix_manager_->get_index_name(tab_name, cols);
         auto it = ihs_.find(ix_name);
         if (it != ihs_.end()) {
             return it->second.get();
         }
-        // 懒加载：索引文件应存在于数据库目录中（client_handler 已 chdir）
+        // 懒加载
         if (!ix_manager_->exists(tab_name, cols)) {
-            throw RMDBError("Index file not found for lazy open: " + ix_name);
+            return nullptr;
         }
-        auto ih = ix_manager_->open_index(tab_name, cols);
-        IxIndexHandle* ptr = ih.get();
-        ihs_[ix_name] = std::move(ih);
-        return ptr;
+        try {
+            auto ih = ix_manager_->open_index(tab_name, cols);
+            IxIndexHandle* ptr = ih.get();
+            ihs_[ix_name] = std::move(ih);
+            return ptr;
+        } catch (...) {
+            return nullptr;
+        }
     }
 };
