@@ -39,7 +39,6 @@ bool Planner::get_index_cols(std::string tab_name, std::vector<Condition> curr_c
     // 遍历表上所有索引，找到最佳匹配
     for (auto& index : tab.indexes) {
         std::vector<std::string> matched_cols;
-        bool can_use = true;
         bool found_range = false;
 
         for (auto& idx_col : index.cols) {

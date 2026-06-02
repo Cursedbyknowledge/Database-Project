@@ -10,6 +10,9 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
+#include <climits>
+#include <cmath>
+
 #include "execution_defs.h"
 #include "execution_manager.h"
 #include "executor_abstract.h"
@@ -180,8 +183,45 @@ class IndexScanExecutor : public AbstractExecutor {
         int col_tot_len = index_meta_.col_tot_len;
         char* low_key = new char[col_tot_len];
         char* high_key = new char[col_tot_len];
-        memset(low_key, 0, col_tot_len);
-        memset(high_key, 0xFF, col_tot_len);
+
+        auto fill_key_min = [&](char* buf, int start_offset) {
+            int off = 0;
+            for (auto& c : index_meta_.cols) {
+                if (off >= start_offset) {
+                    if (c.type == TYPE_INT) {
+                        int min_val = INT_MIN;
+                        memcpy(buf + off, &min_val, c.len);
+                    } else if (c.type == TYPE_FLOAT) {
+                        float min_val = -INFINITY;
+                        memcpy(buf + off, &min_val, c.len);
+                    } else {
+                        memset(buf + off, 0, c.len);
+                    }
+                }
+                off += c.len;
+            }
+        };
+
+        auto fill_key_max = [&](char* buf, int start_offset) {
+            int off = 0;
+            for (auto& c : index_meta_.cols) {
+                if (off >= start_offset) {
+                    if (c.type == TYPE_INT) {
+                        int max_val = INT_MAX;
+                        memcpy(buf + off, &max_val, c.len);
+                    } else if (c.type == TYPE_FLOAT) {
+                        float max_val = INFINITY;
+                        memcpy(buf + off, &max_val, c.len);
+                    } else {
+                        memset(buf + off, 0xFF, c.len);
+                    }
+                }
+                off += c.len;
+            }
+        };
+
+        fill_key_min(low_key, 0);
+        fill_key_max(high_key, 0);
 
         Iid scan_start, scan_end;
         bool use_leaf_begin = true;
@@ -191,7 +231,6 @@ class IndexScanExecutor : public AbstractExecutor {
 
         for (size_t i = 0; i < index_meta_.cols.size(); i++) {
             auto& col = index_meta_.cols[i];
-            int remaining = col_tot_len - col.len;
 
             if (i == 0) {
                 auto bounds = find_col_bounds(col);
@@ -199,7 +238,6 @@ class IndexScanExecutor : public AbstractExecutor {
                     const char* val_data = bounds.eq_cond->rhs_val.raw->data;
                     memcpy(low_key, val_data, col.len);
                     memcpy(high_key, val_data, col.len);
-                    remaining = col_tot_len - col.len;
                     use_leaf_begin = false;
                     use_leaf_end = false;
 
@@ -207,9 +245,9 @@ class IndexScanExecutor : public AbstractExecutor {
                         const char* low_data = bounds.lower_cond->rhs_val.raw->data;
                         memcpy(low_key, low_data, col.len);
                         if (bounds.lower_cond->op == OP_GE) {
-                            memset(low_key + col.len, 0, remaining);
+                            fill_key_min(low_key, col.len);
                         } else {
-                            memset(low_key + col.len, 0xFF, remaining);
+                            fill_key_max(low_key, col.len);
                         }
                         start_upper = (bounds.lower_cond->op == OP_GT);
                     }
@@ -217,9 +255,9 @@ class IndexScanExecutor : public AbstractExecutor {
                         const char* up_data = bounds.upper_cond->rhs_val.raw->data;
                         memcpy(high_key, up_data, col.len);
                         if (bounds.upper_cond->op == OP_LE) {
-                            memset(high_key + col.len, 0xFF, remaining);
+                            fill_key_max(high_key, col.len);
                         } else {
-                            memset(high_key + col.len, 0, remaining);
+                            fill_key_min(high_key, col.len);
                         }
                         end_lower = (bounds.upper_cond->op == OP_LT);
                     }
@@ -227,7 +265,6 @@ class IndexScanExecutor : public AbstractExecutor {
                     for (size_t j = 1; j < index_meta_.cols.size(); j++) {
                         auto& next_col = index_meta_.cols[j];
                         auto next_cond = find_cond_for_col(next_col.name);
-                        int remaining_j = col_tot_len - offset - next_col.len;
                         if (next_cond == nullptr) break;
                         const char* next_val = next_cond->rhs_val.raw->data;
                         if (next_cond->op == OP_EQ) {
@@ -237,18 +274,18 @@ class IndexScanExecutor : public AbstractExecutor {
                         } else if (next_cond->op == OP_GE || next_cond->op == OP_GT) {
                             memcpy(low_key + offset, next_val, next_col.len);
                             if (next_cond->op == OP_GE) {
-                                memset(low_key + offset + next_col.len, 0, remaining_j);
+                                fill_key_min(low_key, offset + next_col.len);
                             } else {
-                                memset(low_key + offset + next_col.len, 0xFF, remaining_j);
+                                fill_key_max(low_key, offset + next_col.len);
                                 start_upper = true;
                             }
                             break;
                         } else if (next_cond->op == OP_LE || next_cond->op == OP_LT) {
                             memcpy(high_key + offset, next_val, next_col.len);
                             if (next_cond->op == OP_LE) {
-                                memset(high_key + offset + next_col.len, 0xFF, remaining_j);
+                                fill_key_max(high_key, offset + next_col.len);
                             } else {
-                                memset(high_key + offset + next_col.len, 0, remaining_j);
+                                fill_key_min(high_key, offset + next_col.len);
                             }
                             end_lower = (next_cond->op == OP_LT);
                             break;
@@ -261,9 +298,9 @@ class IndexScanExecutor : public AbstractExecutor {
                     const char* val_data = bounds.lower_cond->rhs_val.raw->data;
                     memcpy(low_key, val_data, col.len);
                     if (bounds.lower_cond->op == OP_GE) {
-                        memset(low_key + col.len, 0, remaining);
+                        fill_key_min(low_key, col.len);
                     } else {
-                        memset(low_key + col.len, 0xFF, remaining);
+                        fill_key_max(low_key, col.len);
                     }
                     use_leaf_begin = false;
                     start_upper = (bounds.lower_cond->op == OP_GT);
@@ -272,9 +309,9 @@ class IndexScanExecutor : public AbstractExecutor {
                     const char* val_data = bounds.upper_cond->rhs_val.raw->data;
                     memcpy(high_key, val_data, col.len);
                     if (bounds.upper_cond->op == OP_LE) {
-                        memset(high_key + col.len, 0xFF, remaining);
+                        fill_key_max(high_key, col.len);
                     } else {
-                        memset(high_key + col.len, 0, remaining);
+                        fill_key_min(high_key, col.len);
                     }
                     use_leaf_end = false;
                     end_lower = (bounds.upper_cond->op == OP_LT);
@@ -289,7 +326,6 @@ class IndexScanExecutor : public AbstractExecutor {
             for (size_t j = 0; j < i; j++) {
                 offset += index_meta_.cols[j].len;
             }
-            int remaining_cur = col_tot_len - offset - col.len;
             const char* val_data = cond->rhs_val.raw->data;
 
             if (cond->op == OP_EQ) {
@@ -298,17 +334,17 @@ class IndexScanExecutor : public AbstractExecutor {
             } else if (cond->op == OP_GE || cond->op == OP_GT) {
                 memcpy(low_key + offset, val_data, col.len);
                 if (cond->op == OP_GE) {
-                    memset(low_key + offset + col.len, 0, remaining_cur);
+                    fill_key_min(low_key, offset + col.len);
                 } else {
-                    memset(low_key + offset + col.len, 0xFF, remaining_cur);
+                    fill_key_max(low_key, offset + col.len);
                 }
                 break;
             } else if (cond->op == OP_LE || cond->op == OP_LT) {
                 memcpy(high_key + offset, val_data, col.len);
                 if (cond->op == OP_LE) {
-                    memset(high_key + offset + col.len, 0xFF, remaining_cur);
+                    fill_key_max(high_key, offset + col.len);
                 } else {
-                    memset(high_key + offset + col.len, 0, remaining_cur);
+                    fill_key_min(high_key, offset + col.len);
                 }
                 end_lower = (cond->op == OP_LT);
                 break;
