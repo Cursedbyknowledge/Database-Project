@@ -116,11 +116,6 @@ void SmManager::close_db() {
         rm_manager_->close_file(entry.second.get());
     }
     fhs_.clear();
-    // 同时关闭所有索引文件
-    for (auto &entry : ihs_) {
-        ix_manager_->close_index(entry.second.get());
-    }
-    ihs_.clear();
     flush_meta();
 }
 
