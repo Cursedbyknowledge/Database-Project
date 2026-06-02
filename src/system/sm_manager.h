@@ -80,13 +80,20 @@ class SmManager {
 
     void show_index_from(const std::string& tab_name, Context* context);
 
-    // 安全获取索引句柄（避免 ihs_.at() 抛 std::out_of_range 导致服务器崩溃）
+    // 安全获取索引句柄，找不到则懒加载打开（避免 open_db 遗漏导致的崩溃）
     IxIndexHandle* get_ih(const std::string& tab_name, const std::vector<ColMeta>& cols) {
         std::string ix_name = ix_manager_->get_index_name(tab_name, cols);
         auto it = ihs_.find(ix_name);
-        if (it == ihs_.end()) {
-            throw RMDBError("Index handle not found: " + ix_name + ". The index may not be opened.");
+        if (it != ihs_.end()) {
+            return it->second.get();
         }
-        return it->second.get();
+        // 懒加载：索引文件应存在于数据库目录中（client_handler 已 chdir）
+        if (!ix_manager_->exists(tab_name, cols)) {
+            throw RMDBError("Index file not found for lazy open: " + ix_name);
+        }
+        auto ih = ix_manager_->open_index(tab_name, cols);
+        IxIndexHandle* ptr = ih.get();
+        ihs_[ix_name] = std::move(ih);
+        return ptr;
     }
 };

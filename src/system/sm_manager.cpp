@@ -93,16 +93,7 @@ void SmManager::open_db(const std::string& db_name) {
     for (auto &entry : db_.tabs_) {
         fhs_.emplace(entry.first, rm_manager_->open_file(entry.first));
     }
-    // 同时打开所有索引文件（使用 operator[] 覆盖，而非 emplace 忽略已有 key）
-    ihs_.clear();
-    for (auto &tab_entry : db_.tabs_) {
-        for (auto &index : tab_entry.second.indexes) {
-            std::string ix_name = ix_manager_->get_index_name(tab_entry.first, index.cols);
-            if (ix_manager_->exists(tab_entry.first, index.cols)) {
-                ihs_[ix_name] = ix_manager_->open_index(tab_entry.first, index.cols);
-            }
-        }
-    }
+    // 索引文件通过 get_ih() 懒加载打开，不在此处预加载
     if (chdir("..") < 0) {
         throw UnixError();
     }
