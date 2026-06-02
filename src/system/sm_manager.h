@@ -79,25 +79,4 @@ class SmManager {
     void drop_index(const std::string& tab_name, const std::vector<ColMeta>& col_names, Context* context);
 
     void show_index_from(const std::string& tab_name, Context* context);
-
-    // 安全获取索引句柄，找不到或打不开返回 nullptr（调用方自行处理）
-    IxIndexHandle* get_ih(const std::string& tab_name, const std::vector<ColMeta>& cols) {
-        std::string ix_name = ix_manager_->get_index_name(tab_name, cols);
-        auto it = ihs_.find(ix_name);
-        if (it != ihs_.end()) {
-            return it->second.get();
-        }
-        // 懒加载
-        if (!ix_manager_->exists(tab_name, cols)) {
-            return nullptr;
-        }
-        try {
-            auto ih = ix_manager_->open_index(tab_name, cols);
-            IxIndexHandle* ptr = ih.get();
-            ihs_[ix_name] = std::move(ih);
-            return ptr;
-        } catch (...) {
-            return nullptr;
-        }
-    }
 };

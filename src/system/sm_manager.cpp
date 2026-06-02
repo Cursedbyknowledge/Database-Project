@@ -93,7 +93,6 @@ void SmManager::open_db(const std::string& db_name) {
     for (auto &entry : db_.tabs_) {
         fhs_.emplace(entry.first, rm_manager_->open_file(entry.first));
     }
-    // 索引文件通过 get_ih() 懒加载打开，不在此处预加载
     if (chdir("..") < 0) {
         throw UnixError();
     }
@@ -259,9 +258,33 @@ void SmManager::create_index(const std::string& tab_name, const std::vector<std:
     }
     tab.indexes.push_back(index_meta);
 
-    // 打开索引（B+ 树 insert_entry 有 segfault bug，跳过构建，索引文件创建但为空）
+    // 打开索引并构建B+树：扫描全表数据并插入索引
     auto ih = ix_manager_->open_index(tab_name, index_cols);
-    // B+ 树 insert_entry crash → 跳过填充。索引仅存元数据+空文件，查询走全表扫描。
+    auto fh = fhs_.at(tab_name).get();
+    auto scan = std::make_unique<RmScan>(fh);
+
+    for (scan->next(); !scan->is_end(); scan->next()) {
+        auto rec = fh->get_record(scan->rid(), context);
+        // 构造索引 key：按照 index_cols 的顺序拼接字段值
+        char *key = new char[index_meta.col_tot_len];
+        int offset = 0;
+        for (auto &col : index_cols) {
+            memcpy(key + offset, rec->data + col.offset, col.len);
+            offset += col.len;
+        }
+        // 插入到 B+ 树中
+        try {
+            ih->insert_entry(key, scan->rid(), context->txn_);
+        } catch (DuplicateKeyError &e) {
+            // 表中已有重复值，回滚：删除索引文件
+            delete[] key;
+            ih.reset();
+            ix_manager_->destroy_index(tab_name, index_cols);
+            tab.indexes.pop_back();
+            throw;
+        }
+        delete[] key;
+    }
 
     // 将索引句柄加入管理
     std::string ix_name = ix_manager_->get_index_name(tab_name, index_cols);
