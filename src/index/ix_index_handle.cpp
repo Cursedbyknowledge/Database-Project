@@ -386,8 +386,7 @@ void IxIndexHandle::insert_into_parent(IxNodeHandle *old_node, const char *key, 
     rid_new.page_no = new_node->get_page_no();
     rid_new.slot_no = 0;
 
-    // 插入到 parent 的 rank 位置
-    parent->insert_pair(rank, key, rid_new);
+    parent->insert_pair(rank + 1, key, rid_new);
 
     new_node->set_parent_page_no(parent->get_page_no());
 
