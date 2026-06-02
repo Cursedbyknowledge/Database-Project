@@ -116,8 +116,15 @@ class IndexScanExecutor : public AbstractExecutor {
             // 等值索引加速：用 get_value 收集所有匹配 Rid
             char *k = new char[index_meta_.col_tot_len];
             build_eq_key(k);
-            ih_->get_value(k, &idx_rids_, context_->txn_);
-            delete[] k;
+            try { ih_->get_value(k, &idx_rids_, context_->txn_); }
+            catch (...) { delete[] k; use_index_eq_ = false; }
+            if (!use_index_eq_) {
+                delete[] k;
+                scan_ = std::make_unique<RmScan>(fh_);
+                rid_ = scan_->rid();
+                while (!scan_->is_end()) { auto rec=fh_->get_record(rid_,context_); if(eval_conds(rec->data))return; scan_->next();rid_=scan_->rid(); }
+                return;
+            }
             idx_pos_ = 0;
             // 后过滤找到第一条匹配记录
             scan_.reset();
