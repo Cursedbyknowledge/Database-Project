@@ -157,11 +157,9 @@ void IxNodeHandle::insert_pairs(int pos, const char *key, const Rid *rid, int n)
  */
 int IxNodeHandle::insert(const char *key, const Rid &value) {
     int pos = lower_bound(key);
-    // 如果是叶子节点且有重复key，不插入（唯一索引）
     if (is_leaf_page() && pos < page_hdr->num_key &&
         ix_compare(get_key(pos), key, file_hdr->col_types_, file_hdr->col_lens_) == 0) {
-        // 重复key，抛出异常
-        throw IndexEntryNotFoundError();  // 实际应该用 DuplicateKeyError
+        throw DuplicateKeyError();
     }
     insert_pair(pos, key, value);
     return page_hdr->num_key;
@@ -218,6 +216,7 @@ IxIndexHandle::IxIndexHandle(DiskManager *disk_manager, BufferPoolManager *buffe
     disk_manager_->read_page(fd, IX_FILE_HDR_PAGE, buf, PAGE_SIZE);
     file_hdr_ = new IxFileHdr();
     file_hdr_->deserialize(buf);
+    delete[] buf;
     
     // disk_manager管理的fd对应的文件中，设置从file_hdr_->num_pages开始分配page_no
     int now_page_no = disk_manager_->get_fd2pageno(fd);
@@ -556,12 +555,11 @@ bool IxIndexHandle::coalesce_or_redistribute(IxNodeHandle *node, Transaction *tr
     buffer_pool_manager_->unpin_page(node->get_page_id(), true);
 
     if (parent_should_delete) {
-        // parent 需要被删除，递归处理
         bool dummy;
         coalesce_or_redistribute(parent, transaction, &dummy);
+    } else {
+        buffer_pool_manager_->unpin_page(parent->get_page_id(), true);
     }
-
-    buffer_pool_manager_->unpin_page(parent->get_page_id(), true);
     return false;
 }
 

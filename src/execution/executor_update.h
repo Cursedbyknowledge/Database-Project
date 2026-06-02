@@ -41,12 +41,43 @@ class UpdateExecutor : public AbstractExecutor {
     std::unique_ptr<RmRecord> Next() override {
         for (auto &rid : rids_) {
             auto rec = fh_->get_record(rid, context_);
+
+            for (auto &index : tab_.indexes) {
+                auto ih = sm_manager_->get_ih(tab_name_, index.cols);
+                char* old_key = new char[index.col_tot_len];
+                int offset = 0;
+                for (size_t j = 0; j < (size_t)index.col_num; ++j) {
+                    memcpy(old_key + offset, rec->data + index.cols[j].offset, index.cols[j].len);
+                    offset += index.cols[j].len;
+                }
+                ih->delete_entry(old_key, context_->txn_);
+                delete[] old_key;
+            }
+
             for (auto &set_clause : set_clauses_) {
                 auto col_meta = tab_.get_col(set_clause.lhs.col_name);
                 set_clause.rhs.init_raw(col_meta->len);
                 memcpy(rec->data + col_meta->offset, set_clause.rhs.raw->data, col_meta->len);
                 if (set_clause.rhs.raw) set_clause.rhs.raw.reset();
             }
+
+            for (auto &index : tab_.indexes) {
+                auto ih = sm_manager_->get_ih(tab_name_, index.cols);
+                char* new_key = new char[index.col_tot_len];
+                int offset = 0;
+                for (size_t j = 0; j < (size_t)index.col_num; ++j) {
+                    memcpy(new_key + offset, rec->data + index.cols[j].offset, index.cols[j].len);
+                    offset += index.cols[j].len;
+                }
+                std::vector<Rid> result;
+                if (ih->get_value(new_key, &result, context_->txn_)) {
+                    delete[] new_key;
+                    throw RMDBError("Duplicate entry for unique index");
+                }
+                ih->insert_entry(new_key, rid, context_->txn_);
+                delete[] new_key;
+            }
+
             fh_->update_record(rid, rec->data, context_);
         }
         return nullptr;

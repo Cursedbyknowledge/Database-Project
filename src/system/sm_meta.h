@@ -109,6 +109,20 @@ struct TabMeta {
         throw IndexNotFoundError(name, col_names);
     }
 
+    std::vector<IndexMeta>::iterator get_index_meta_prefix(const std::vector<std::string>& col_names) {
+        for(auto index = indexes.begin(); index != indexes.end(); ++index) {
+            if((*index).col_num < (int)col_names.size()) continue;
+            auto& index_cols = (*index).cols;
+            size_t i = 0;
+            for(; i < col_names.size(); ++i) {
+                if(index_cols[i].name.compare(col_names[i]) != 0)
+                    break;
+            }
+            if(i == col_names.size()) return index;
+        }
+        throw IndexNotFoundError(name, col_names);
+    }
+
     std::vector<ColMeta>::iterator get_col(const std::string &col_name) {
         auto pos = std::find_if(cols.begin(), cols.end(), [&](const ColMeta &col) { return col.name == col_name; });
         if (pos == cols.end()) {

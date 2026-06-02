@@ -157,11 +157,6 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
         captions.push_back(sel_col.col_name);
     }
 
-    // Print header into buffer
-    RecordPrinter rec_printer(sel_cols.size());
-    rec_printer.print_separator(context);
-    rec_printer.print_record(captions, context);
-    rec_printer.print_separator(context);
     // print header into file
     std::fstream outfile;
     outfile.open("output.txt", std::ios::out | std::ios::app);
@@ -170,6 +165,19 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
         outfile << " " << captions[i] << " |";
     }
     outfile << "\n";
+    // print header into buffer (same simple format)
+    {
+        std::string header;
+        header += "|";
+        for (int i = 0; i < captions.size(); ++i) {
+            header += " " + captions[i] + " |";
+        }
+        header += "\n";
+        if (*(context->offset_) + header.length() < BUFFER_LENGTH) {
+            memcpy(context->data_send_ + *(context->offset_), header.c_str(), header.length());
+            *(context->offset_) += header.length();
+        }
+    }
 
     // Print records
     size_t num_rec = 0;
@@ -190,8 +198,19 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
             }
             columns.push_back(col_str);
         }
-        // print record into buffer
-        rec_printer.print_record(columns, context);
+        // print record into buffer (same simple format)
+        {
+            std::string rec_str;
+            rec_str += "|";
+            for (int i = 0; i < columns.size(); ++i) {
+                rec_str += " " + columns[i] + " |";
+            }
+            rec_str += "\n";
+            if (*(context->offset_) + rec_str.length() < BUFFER_LENGTH) {
+                memcpy(context->data_send_ + *(context->offset_), rec_str.c_str(), rec_str.length());
+                *(context->offset_) += rec_str.length();
+            }
+        }
         // print record into file
         outfile << "|";
         for(int i = 0; i < columns.size(); ++i) {
@@ -201,10 +220,6 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
         num_rec++;
     }
     outfile.close();
-    // Print footer into buffer
-    rec_printer.print_separator(context);
-    // Print record count into buffer
-    RecordPrinter::print_record_count(num_rec, context);
 }
 
 // 执行DML语句

@@ -79,4 +79,13 @@ class SmManager {
     void drop_index(const std::string& tab_name, const std::vector<ColMeta>& col_names, Context* context);
 
     void show_index_from(const std::string& tab_name, Context* context);
+
+    IxIndexHandle* get_ih(const std::string& tab_name, const std::vector<ColMeta>& cols) {
+        std::string ix_name = ix_manager_->get_index_name(tab_name, cols);
+        auto it = ihs_.find(ix_name);
+        if (it == ihs_.end()) {
+            throw IndexNotFoundError(tab_name, std::vector<std::string>());
+        }
+        return it->second.get();
+    }
 };

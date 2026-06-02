@@ -162,6 +162,7 @@ class IxManager {
         disk_manager_->write_page(ih->fd_, IX_FILE_HDR_PAGE, data, ih->file_hdr_->tot_len_);
         delete[] data;
         buffer_pool_manager_->flush_all_pages(ih->fd_);
+        buffer_pool_manager_->remove_pages_for_fd(ih->fd_);
         disk_manager_->close_file(ih->fd_);
     }
 };

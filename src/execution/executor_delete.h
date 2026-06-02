@@ -38,6 +38,20 @@ class DeleteExecutor : public AbstractExecutor {
 
     std::unique_ptr<RmRecord> Next() override {
         for (auto &rid : rids_) {
+            auto rec = fh_->get_record(rid, context_);
+
+            for (auto &index : tab_.indexes) {
+                auto ih = sm_manager_->get_ih(tab_name_, index.cols);
+                char* key = new char[index.col_tot_len];
+                int offset = 0;
+                for (size_t j = 0; j < (size_t)index.col_num; ++j) {
+                    memcpy(key + offset, rec->data + index.cols[j].offset, index.cols[j].len);
+                    offset += index.cols[j].len;
+                }
+                ih->delete_entry(key, context_->txn_);
+                delete[] key;
+            }
+
             fh_->delete_record(rid, context_);
         }
         return nullptr;

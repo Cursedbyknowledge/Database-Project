@@ -263,7 +263,7 @@ void SmManager::create_index(const std::string& tab_name, const std::vector<std:
     auto fh = fhs_.at(tab_name).get();
     auto scan = std::make_unique<RmScan>(fh);
 
-    for (scan->next(); !scan->is_end(); scan->next()) {
+    for (; !scan->is_end(); scan->next()) {
         auto rec = fh->get_record(scan->rid(), context);
         // 构造索引 key：按照 index_cols 的顺序拼接字段值
         char *key = new char[index_meta.col_tot_len];

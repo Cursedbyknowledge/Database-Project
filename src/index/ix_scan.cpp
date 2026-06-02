@@ -20,9 +20,12 @@ void IxScan::next() {
     assert(node->is_leaf_page());
     assert(iid_.slot_no < node->get_size());
     iid_.slot_no++;
-    if (iid_.page_no != ih_->file_hdr_->last_leaf_ && iid_.slot_no == node->get_size()) {
-        iid_.slot_no = 0;
-        iid_.page_no = node->get_next_leaf();
+    if (iid_.slot_no == node->get_size() && iid_.page_no != ih_->file_hdr_->last_leaf_) {
+        page_id_t next_page = node->get_next_leaf();
+        if (next_page != IX_LEAF_HEADER_PAGE) {
+            iid_.slot_no = 0;
+            iid_.page_no = next_page;
+        }
     }
     bpm_->unpin_page(node->get_page_id(), false);
     delete node;

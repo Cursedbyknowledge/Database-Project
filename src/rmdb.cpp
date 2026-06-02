@@ -117,7 +117,6 @@ void *client_handler(void *sock_fd) {
         Context *context = new Context(lock_manager.get(), log_manager.get(), nullptr, data_send, &offset);
         SetTransaction(&txn_id, context);
 
-        bool show_index_handled = false;
         bool finish_analyze = false;
         pthread_mutex_lock(buffer_mutex);
 
@@ -129,10 +128,9 @@ void *client_handler(void *sock_fd) {
             while (end < sql.size() && !isspace((unsigned char)sql[end]) && sql[end] != ';') end++;
             std::string tab_name = sql.substr(start, end - start);
             pthread_mutex_unlock(buffer_mutex);
-            show_index_handled = true;
 
             try {
-                sm_manager->show_index(tab_name, context);
+                sm_manager->show_index_from(tab_name, context);
             } catch (RMDBError &e) {
                 std::cerr << e.what() << std::endl;
                 memcpy(data_send, e.what(), e.get_msg_len());

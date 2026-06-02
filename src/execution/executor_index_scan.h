@@ -33,6 +33,50 @@ class IndexScanExecutor : public AbstractExecutor {
     std::unique_ptr<RecScan> scan_;
 
     SmManager *sm_manager_;
+    IxIndexHandle *ih_;
+    bool index_scan_usable_;
+
+    const Condition* find_cond_for_col(const std::string& col_name) {
+        for (auto& cond : conds_) {
+            if (cond.lhs_col.col_name == col_name && cond.is_rhs_val) {
+                return &cond;
+            }
+        }
+        return nullptr;
+    }
+
+    struct ColBounds {
+        const Condition* lower_cond = nullptr;
+        const Condition* upper_cond = nullptr;
+        const Condition* eq_cond = nullptr;
+    };
+
+    ColBounds find_col_bounds(const ColMeta& col) {
+        ColBounds bounds;
+        for (auto& cond : conds_) {
+            if (cond.lhs_col.col_name != col.name || !cond.is_rhs_val) continue;
+            if (cond.op == OP_EQ) {
+                bounds.eq_cond = &cond;
+            } else if (cond.op == OP_GT || cond.op == OP_GE) {
+                if (bounds.lower_cond == nullptr) {
+                    bounds.lower_cond = &cond;
+                } else {
+                    int cmp = ix_compare(cond.rhs_val.raw->data, bounds.lower_cond->rhs_val.raw->data,
+                                         col.type, col.len);
+                    if (cmp > 0) bounds.lower_cond = &cond;
+                }
+            } else if (cond.op == OP_LT || cond.op == OP_LE) {
+                if (bounds.upper_cond == nullptr) {
+                    bounds.upper_cond = &cond;
+                } else {
+                    int cmp = ix_compare(cond.rhs_val.raw->data, bounds.upper_cond->rhs_val.raw->data,
+                                         col.type, col.len);
+                    if (cmp < 0) bounds.upper_cond = &cond;
+                }
+            }
+        }
+        return bounds;
+    }
 
     bool eval_cond(const Condition &cond, const char *rec_data) {
         const auto &tab_cols = sm_manager_->db_.get_table(tab_name_).cols;
@@ -93,8 +137,8 @@ class IndexScanExecutor : public AbstractExecutor {
         tab_name_ = std::move(tab_name);
         tab_ = sm_manager_->db_.get_table(tab_name_);
         conds_ = std::move(conds);
-        index_col_names_ = index_col_names; 
-        index_meta_ = *(tab_.get_index_meta(index_col_names_));
+        index_col_names_ = index_col_names;
+        index_meta_ = *(tab_.get_index_meta_prefix(index_col_names_));
         fh_ = sm_manager_->fhs_.at(tab_name_).get();
         cols_ = tab_.cols;
         len_ = cols_.back().offset + cols_.back().len;
@@ -110,27 +154,213 @@ class IndexScanExecutor : public AbstractExecutor {
             }
         }
         fed_conds_ = conds_;
+
+        ih_ = sm_manager_->get_ih(tab_name_, index_meta_.cols);
+
+        index_scan_usable_ = false;
+        auto first_cond = find_cond_for_col(index_meta_.cols[0].name);
+        if (first_cond != nullptr) {
+            index_scan_usable_ = true;
+        }
     }
 
     void beginTuple() override {
-        scan_ = std::make_unique<RmScan>(fh_);
-        rid_ = scan_->rid();
-        while (!scan_->is_end()) {
-            auto rec = fh_->get_record(rid_, context_);
-            if (eval_conds(rec->data)) return;
-            scan_->next();
+        if (!index_scan_usable_) {
+            scan_ = std::make_unique<RmScan>(fh_);
             rid_ = scan_->rid();
+            while (!scan_->is_end()) {
+                auto rec = fh_->get_record(rid_, context_);
+                if (eval_conds(rec->data)) return;
+                scan_->next();
+                rid_ = scan_->rid();
+            }
+            return;
+        }
+
+        int col_tot_len = index_meta_.col_tot_len;
+        char* low_key = new char[col_tot_len];
+        char* high_key = new char[col_tot_len];
+        memset(low_key, 0, col_tot_len);
+        memset(high_key, 0xFF, col_tot_len);
+
+        Iid scan_start, scan_end;
+        bool use_leaf_begin = true;
+        bool use_leaf_end = true;
+        bool start_upper = false;
+        bool end_lower = false;
+
+        for (size_t i = 0; i < index_meta_.cols.size(); i++) {
+            auto& col = index_meta_.cols[i];
+            int remaining = col_tot_len - col.len;
+
+            if (i == 0) {
+                auto bounds = find_col_bounds(col);
+                if (bounds.eq_cond != nullptr) {
+                    const char* val_data = bounds.eq_cond->rhs_val.raw->data;
+                    memcpy(low_key, val_data, col.len);
+                    memcpy(high_key, val_data, col.len);
+                    remaining = col_tot_len - col.len;
+                    use_leaf_begin = false;
+                    use_leaf_end = false;
+
+                    if (bounds.lower_cond != nullptr) {
+                        const char* low_data = bounds.lower_cond->rhs_val.raw->data;
+                        memcpy(low_key, low_data, col.len);
+                        if (bounds.lower_cond->op == OP_GE) {
+                            memset(low_key + col.len, 0, remaining);
+                        } else {
+                            memset(low_key + col.len, 0xFF, remaining);
+                        }
+                        start_upper = (bounds.lower_cond->op == OP_GT);
+                    }
+                    if (bounds.upper_cond != nullptr) {
+                        const char* up_data = bounds.upper_cond->rhs_val.raw->data;
+                        memcpy(high_key, up_data, col.len);
+                        if (bounds.upper_cond->op == OP_LE) {
+                            memset(high_key + col.len, 0xFF, remaining);
+                        } else {
+                            memset(high_key + col.len, 0, remaining);
+                        }
+                        end_lower = (bounds.upper_cond->op == OP_LT);
+                    }
+                    int offset = col.len;
+                    for (size_t j = 1; j < index_meta_.cols.size(); j++) {
+                        auto& next_col = index_meta_.cols[j];
+                        auto next_cond = find_cond_for_col(next_col.name);
+                        int remaining_j = col_tot_len - offset - next_col.len;
+                        if (next_cond == nullptr) break;
+                        const char* next_val = next_cond->rhs_val.raw->data;
+                        if (next_cond->op == OP_EQ) {
+                            memcpy(low_key + offset, next_val, next_col.len);
+                            memcpy(high_key + offset, next_val, next_col.len);
+                            offset += next_col.len;
+                        } else if (next_cond->op == OP_GE || next_cond->op == OP_GT) {
+                            memcpy(low_key + offset, next_val, next_col.len);
+                            if (next_cond->op == OP_GE) {
+                                memset(low_key + offset + next_col.len, 0, remaining_j);
+                            } else {
+                                memset(low_key + offset + next_col.len, 0xFF, remaining_j);
+                                start_upper = true;
+                            }
+                            break;
+                        } else if (next_cond->op == OP_LE || next_cond->op == OP_LT) {
+                            memcpy(high_key + offset, next_val, next_col.len);
+                            if (next_cond->op == OP_LE) {
+                                memset(high_key + offset + next_col.len, 0xFF, remaining_j);
+                            } else {
+                                memset(high_key + offset + next_col.len, 0, remaining_j);
+                            }
+                            end_lower = (next_cond->op == OP_LT);
+                            break;
+                        }
+                        offset += next_col.len;
+                    }
+                    break;
+                }
+                if (bounds.lower_cond != nullptr) {
+                    const char* val_data = bounds.lower_cond->rhs_val.raw->data;
+                    memcpy(low_key, val_data, col.len);
+                    if (bounds.lower_cond->op == OP_GE) {
+                        memset(low_key + col.len, 0, remaining);
+                    } else {
+                        memset(low_key + col.len, 0xFF, remaining);
+                    }
+                    use_leaf_begin = false;
+                    start_upper = (bounds.lower_cond->op == OP_GT);
+                }
+                if (bounds.upper_cond != nullptr) {
+                    const char* val_data = bounds.upper_cond->rhs_val.raw->data;
+                    memcpy(high_key, val_data, col.len);
+                    if (bounds.upper_cond->op == OP_LE) {
+                        memset(high_key + col.len, 0xFF, remaining);
+                    } else {
+                        memset(high_key + col.len, 0, remaining);
+                    }
+                    use_leaf_end = false;
+                    end_lower = (bounds.upper_cond->op == OP_LT);
+                }
+                break;
+            }
+
+            auto cond = find_cond_for_col(col.name);
+            if (cond == nullptr) break;
+
+            int offset = 0;
+            for (size_t j = 0; j < i; j++) {
+                offset += index_meta_.cols[j].len;
+            }
+            int remaining_cur = col_tot_len - offset - col.len;
+            const char* val_data = cond->rhs_val.raw->data;
+
+            if (cond->op == OP_EQ) {
+                memcpy(low_key + offset, val_data, col.len);
+                memcpy(high_key + offset, val_data, col.len);
+            } else if (cond->op == OP_GE || cond->op == OP_GT) {
+                memcpy(low_key + offset, val_data, col.len);
+                if (cond->op == OP_GE) {
+                    memset(low_key + offset + col.len, 0, remaining_cur);
+                } else {
+                    memset(low_key + offset + col.len, 0xFF, remaining_cur);
+                }
+                break;
+            } else if (cond->op == OP_LE || cond->op == OP_LT) {
+                memcpy(high_key + offset, val_data, col.len);
+                if (cond->op == OP_LE) {
+                    memset(high_key + offset + col.len, 0xFF, remaining_cur);
+                } else {
+                    memset(high_key + offset + col.len, 0, remaining_cur);
+                }
+                end_lower = (cond->op == OP_LT);
+                break;
+            }
+        }
+
+        if (use_leaf_begin) {
+            scan_start = ih_->leaf_begin();
+        } else if (start_upper) {
+            scan_start = ih_->upper_bound(low_key);
+        } else {
+            scan_start = ih_->lower_bound(low_key);
+        }
+
+        if (use_leaf_end) {
+            scan_end = ih_->leaf_end();
+        } else if (end_lower) {
+            scan_end = ih_->lower_bound(high_key);
+        } else {
+            scan_end = ih_->upper_bound(high_key);
+        }
+
+        delete[] low_key;
+        delete[] high_key;
+
+        scan_ = std::make_unique<IxScan>(ih_, scan_start, scan_end, sm_manager_->get_bpm());
+
+        if (!scan_->is_end()) {
+            rid_ = scan_->rid();
+            while (!scan_->is_end()) {
+                auto rec = fh_->get_record(rid_, context_);
+                if (eval_conds(rec->data)) return;
+                scan_->next();
+                if (!scan_->is_end()) {
+                    rid_ = scan_->rid();
+                }
+            }
         }
     }
 
     void nextTuple() override {
         scan_->next();
-        rid_ = scan_->rid();
-        while (!scan_->is_end()) {
-            auto rec = fh_->get_record(rid_, context_);
-            if (eval_conds(rec->data)) return;
-            scan_->next();
+        if (!scan_->is_end()) {
             rid_ = scan_->rid();
+            while (!scan_->is_end()) {
+                auto rec = fh_->get_record(rid_, context_);
+                if (eval_conds(rec->data)) return;
+                scan_->next();
+                if (!scan_->is_end()) {
+                    rid_ = scan_->rid();
+                }
+            }
         }
     }
 

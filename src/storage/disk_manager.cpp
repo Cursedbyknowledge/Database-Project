@@ -11,6 +11,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/disk_manager.h"
 
 #include <assert.h>    // for assert
+#include <stdio.h>     // for fprintf
 #include <string.h>    // for memset
 #include <sys/stat.h>  // for stat
 #include <unistd.h>    // for lseek
@@ -53,6 +54,9 @@ void DiskManager::read_page(int fd, page_id_t page_no, char *offset, int num_byt
     }
     ssize_t bytes_read = read(fd, offset, num_bytes);
     if (bytes_read != num_bytes) {
+        fprintf(stderr, "DiskManager::read_page Error: fd=%d, page_no=%d, num_bytes=%d, bytes_read=%zd, file=%s\n",
+                fd, page_no, num_bytes, bytes_read, fd2path_[fd].c_str());
+        fflush(stderr);
         throw InternalError("DiskManager::read_page Error");
     }
 }

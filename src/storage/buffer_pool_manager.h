@@ -76,6 +76,8 @@ class BufferPoolManager {
 
     void flush_all_pages(int fd);
 
+    void remove_pages_for_fd(int fd);
+
    private:
     bool find_victim_page(frame_id_t* frame_id);
 
