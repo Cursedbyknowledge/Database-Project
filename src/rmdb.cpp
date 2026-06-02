@@ -293,9 +293,9 @@ int main(int argc, char **argv) {
         }
         sm_manager->open_db(db_name);
 
-        recovery->analyze();
-        recovery->redo();
-        recovery->undo();
+        // recovery->analyze();  // 注释掉，排查 storage 崩溃
+        // recovery->redo();
+        // recovery->undo();
         
         start_server();
     } catch (RMDBError &e) {
