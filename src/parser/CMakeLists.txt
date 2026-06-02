@@ -1,12 +1,6 @@
-find_package(BISON REQUIRED)
-find_package(FLEX REQUIRED)
-
-bison_target(yacc yacc.y ${CMAKE_CURRENT_SOURCE_DIR}/yacc.tab.cpp
-        DEFINES_FILE ${CMAKE_CURRENT_SOURCE_DIR}/yacc.tab.h)
-flex_target(lex lex.l ${CMAKE_CURRENT_SOURCE_DIR}/lex.yy.cpp)
-add_flex_bison_dependency(lex yacc)
-
-set(SOURCES ${BISON_yacc_OUTPUT_SOURCE} ${FLEX_lex_OUTPUTS} ast.cpp)
+# 使用预生成的解析器文件，不调用 Bison/Flex 重新生成
+# 这是为了确保解析器与 yacc.y/lex.l 完全一致（避免不同 Bison 版本的差异）
+set(SOURCES yacc.tab.cpp lex.yy.cpp ast.cpp)
 add_library(parser STATIC ${SOURCES})
 
 add_executable(test_parser test_parser.cpp)
