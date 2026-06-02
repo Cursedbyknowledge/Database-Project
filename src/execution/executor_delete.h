@@ -1,5 +1,13 @@
 /* Copyright (c) 2023 Renmin University of China
-RMDB is licensed under Mulan PSL v2. */
+RMDB is licensed under Mulan PSL v2.
+You can use this software according to the terms and conditions of the Mulan PSL v2.
+You may obtain a copy of Mulan PSL v2 at:
+        http://license.coscl.org.cn/MulanPSL2
+THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+See the Mulan PSL v2 for more details. */
+
 #pragma once
 #include "execution_defs.h"
 #include "execution_manager.h"
@@ -17,36 +25,23 @@ class DeleteExecutor : public AbstractExecutor {
     SmManager *sm_manager_;
 
    public:
-    DeleteExecutor(SmManager *sm, const std::string &tn, std::vector<Condition> cd,
-                   std::vector<Rid> rd, Context *ctx)
-        : sm_manager_(sm), tab_name_(tn), conds_(cd), rids_(rd) {
-        tab_ = sm->db_.get_table(tn);
-        fh_ = sm->fhs_.at(tn).get();
-        context_ = ctx;
+    DeleteExecutor(SmManager *sm_manager, const std::string &tab_name, std::vector<Condition> conds,
+                   std::vector<Rid> rids, Context *context) {
+        sm_manager_ = sm_manager;
+        tab_name_ = tab_name;
+        tab_ = sm_manager_->db_.get_table(tab_name);
+        fh_ = sm_manager_->fhs_.at(tab_name).get();
+        conds_ = conds;
+        rids_ = rids;
+        context_ = context;
     }
 
     std::unique_ptr<RmRecord> Next() override {
-        if (tab_.indexes.empty()) {
-            for (auto &rid : rids_) fh_->delete_record(rid, context_);
-        } else {
-            for (auto &rid : rids_) {
-                auto rec = fh_->get_record(rid, context_);
-                for (auto &idx : tab_.indexes) {
-                    auto ih = sm_manager_->get_ih(tab_name_, idx.cols);
-                    if (!ih) continue;
-                    char *k = new char[idx.col_tot_len];
-                    int off = 0;
-                    for (size_t j = 0; j < idx.col_num; ++j) {
-                        memcpy(k + off, rec->data + idx.cols[j].offset, idx.cols[j].len);
-                        off += idx.cols[j].len;
-                    }
-                    ih->delete_entry(k, context_->txn_);
-                    delete[] k;
-                }
-                fh_->delete_record(rid, context_);
-            }
+        for (auto &rid : rids_) {
+            fh_->delete_record(rid, context_);
         }
         return nullptr;
     }
+
     Rid &rid() override { return _abstract_rid; }
 };
