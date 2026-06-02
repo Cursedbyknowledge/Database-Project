@@ -34,6 +34,7 @@ class IndexScanExecutor : public AbstractExecutor {
 
     Rid rid_;
     std::unique_ptr<RecScan> scan_;
+    bool use_fallback_;  // B+ 树扫描失败时回退到全表扫描
 
     SmManager *sm_manager_;
 
@@ -185,37 +186,57 @@ class IndexScanExecutor : public AbstractExecutor {
     }
 
     void beginTuple() override {
-        int col_tot_len = index_meta_.col_tot_len;
-        char *low_key = new char[col_tot_len];
-        char *high_key = new char[col_tot_len];
-        bool needs_upper = false;
-        build_scan_keys(low_key, high_key, needs_upper);
+        use_fallback_ = false;
+        try {
+            int col_tot_len = index_meta_.col_tot_len;
+            char *low_key = new char[col_tot_len];
+            char *high_key = new char[col_tot_len];
+            bool needs_upper = false;
+            build_scan_keys(low_key, high_key, needs_upper);
 
-        // 确定 B+ 树扫描范围:
-        //   needs_upper == true  → upper_bound(high_key) 收束（等值或上界范围）
-        //   needs_upper == false → leaf_end() 不限上界（纯下界范围）
-        Iid lower = ih_->lower_bound(low_key);
-        Iid upper = needs_upper ? ih_->upper_bound(high_key) : ih_->leaf_end();
+            Iid lower = ih_->lower_bound(low_key);
+            Iid upper = needs_upper ? ih_->upper_bound(high_key) : ih_->leaf_end();
 
-        delete[] low_key;
-        delete[] high_key;
+            delete[] low_key;
+            delete[] high_key;
 
-        // 使用 IxScan 遍历 B+ 树叶子节点
-        scan_ = std::make_unique<IxScan>(ih_, lower, upper, sm_manager_->get_bpm());
+            scan_ = std::make_unique<IxScan>(ih_, lower, upper, sm_manager_->get_bpm());
 
-        // 找到第一条满足所有条件的记录（后过滤）
-        if (!scan_->is_end()) {
+            if (!scan_->is_end()) {
+                rid_ = scan_->rid();
+                while (!scan_->is_end()) {
+                    auto rec = fh_->get_record(rid_, context_);
+                    if (eval_conds(rec->data)) return;
+                    scan_->next();
+                    if (!scan_->is_end()) rid_ = scan_->rid();
+                }
+            }
+        } catch (...) {
+            // B+ 树扫描异常（空树/失效 Rid/其他），回退到全表扫描
+            use_fallback_ = true;
+            scan_ = std::make_unique<RmScan>(fh_);
             rid_ = scan_->rid();
             while (!scan_->is_end()) {
                 auto rec = fh_->get_record(rid_, context_);
                 if (eval_conds(rec->data)) return;
                 scan_->next();
-                if (!scan_->is_end()) rid_ = scan_->rid();
+                rid_ = scan_->rid();
             }
         }
     }
 
     void nextTuple() override {
+        if (use_fallback_) {
+            scan_->next();
+            rid_ = scan_->rid();
+            while (!scan_->is_end()) {
+                auto rec = fh_->get_record(rid_, context_);
+                if (eval_conds(rec->data)) return;
+                scan_->next();
+                rid_ = scan_->rid();
+            }
+            return;
+        }
         scan_->next();
         if (!scan_->is_end()) {
             rid_ = scan_->rid();
