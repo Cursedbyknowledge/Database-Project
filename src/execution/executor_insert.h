@@ -55,44 +55,7 @@ class InsertExecutor : public AbstractExecutor {
             memcpy(rec.data + col.offset, val.raw->data, col.len);
         }
 
-        // 索引唯一性检查
-        for (size_t i = 0; i < tab_.indexes.size(); ++i) {
-            auto& index = tab_.indexes[i];
-            auto ih = sm_manager_->get_ih(tab_name_, index.cols);
-            if (!ih) continue;
-            char* key = new char[index.col_tot_len];
-            int offset = 0;
-            for (size_t j = 0; j < index.col_num; ++j) {
-                memcpy(key + offset, rec.data + index.cols[j].offset, index.cols[j].len);
-                offset += index.cols[j].len;
-            }
-            std::vector<Rid> result;
-            try {
-                if (ih->get_value(key, &result, context_->txn_)) {
-                    delete[] key;
-                    throw RMDBError("Duplicate entry for unique index");
-                }
-            } catch (...) { delete[] key; throw; }
-            delete[] key;
-        }
-
         rid_ = fh_->insert_record(rec.data, context_);
-
-        // 更新所有索引
-        for (size_t i = 0; i < tab_.indexes.size(); ++i) {
-            auto& index = tab_.indexes[i];
-            auto ih = sm_manager_->get_ih(tab_name_, index.cols);
-            if (!ih) continue;
-            char* key = new char[index.col_tot_len];
-            int offset = 0;
-            for (size_t j = 0; j < index.col_num; ++j) {
-                memcpy(key + offset, rec.data + index.cols[j].offset, index.cols[j].len);
-                offset += index.cols[j].len;
-            }
-            try { ih->insert_entry(key, rid_, context_->txn_); }
-            catch (...) { delete[] key; throw; }
-            delete[] key;
-        }
         return nullptr;
     }
     Rid &rid() override { return rid_; }
