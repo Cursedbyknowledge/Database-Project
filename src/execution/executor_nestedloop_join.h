@@ -26,6 +26,16 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     std::unique_ptr<RmRecord> left_record_;
     std::unique_ptr<RmRecord> right_record_;  // cached right record for Next()
 
+    // INLJ support
+    RmFileHandle *right_fh_;
+    IxIndexHandle *right_ih_;
+    int join_key_offset_;
+    ColType join_key_type_;
+    int join_key_len_;
+    bool use_inlj_;
+    std::vector<Rid> right_rids_;
+    size_t right_rid_idx_;
+
     int val_compare(const char *a, const char *b, ColType type, int len) {
         if (type == TYPE_INT) {
             int ia = *(int *)a, ib = *(int *)b;
@@ -84,7 +94,6 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     }
 
     // Find next matching right record for current left, or advance left if exhausted
-    // Returns false if no more matches at all
     bool find_next_match() {
         while (true) {
             // Try next right with current left
@@ -96,26 +105,51 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
             }
             // Right exhausted, advance left
             left_->nextTuple();
-            if (left_->is_end()) {
-                isend_ = true;
-                return false;
-            }
+            if (left_->is_end()) { isend_ = true; return false; }
             left_record_ = left_->Next();
+            
+            // INLJ fast path: use index point lookup instead of full scan
+            if (use_inlj_) {
+                char *join_key = left_record_->data + join_key_offset_;
+                right_rids_.clear();
+                right_ih_->get_value(join_key, &right_rids_, nullptr);
+                if (!right_rids_.empty()) {
+                    right_rid_idx_ = 0;
+                    right_record_ = right_fh_->get_record(right_rids_[0], nullptr);
+                    return true;
+                }
+                continue;  // no match, try next left
+            }
+            
+            // Standard NLJ: restart full right scan
             right_->beginTuple();
             if (!right_->is_end()) {
                 right_record_ = right_->Next();
                 if (satisfy_join_cond(left_record_.get(), right_record_.get())) return true;
                 continue;
             }
-            // Right is empty
             isend_ = true;
             return false;
         }
     }
 
+    // INLJ: get next right record from cached index results
+    bool try_next_inlj_right() {
+        right_rid_idx_++;
+        if (right_rid_idx_ < right_rids_.size()) {
+            right_record_ = right_fh_->get_record(right_rids_[right_rid_idx_], nullptr);
+            return true;
+        }
+        return false;
+    }
+
    public:
     NestedLoopJoinExecutor(std::unique_ptr<AbstractExecutor> left, std::unique_ptr<AbstractExecutor> right, 
-                            std::vector<Condition> conds) {
+                            std::vector<Condition> conds,
+                            RmFileHandle *right_fh = nullptr, IxIndexHandle *right_ih = nullptr,
+                            int join_key_offset = -1, ColType join_key_type = TYPE_INT, int join_key_len = 0)
+        : right_fh_(right_fh), right_ih_(right_ih), join_key_offset_(join_key_offset),
+          join_key_type_(join_key_type), join_key_len_(join_key_len), use_inlj_(right_ih != nullptr) {
         left_ = std::move(left);
         right_ = std::move(right);
         len_ = left_->tupleLen() + right_->tupleLen();
@@ -127,6 +161,7 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         cols_.insert(cols_.end(), right_cols.begin(), right_cols.end());
         isend_ = false;
         fed_conds_ = std::move(conds);
+        right_rid_idx_ = 0;
     }
 
     void beginTuple() override {
@@ -135,14 +170,28 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         if (left_->is_end()) { isend_ = true; return; }
         left_record_ = left_->Next();
         
-        // Find first matching right record
+        // INLJ fast path: index point lookup for first left row
+        if (use_inlj_) {
+            char *join_key = left_record_->data + join_key_offset_;
+            right_rids_.clear();
+            right_ih_->get_value(join_key, &right_rids_, nullptr);
+            if (!right_rids_.empty()) {
+                right_rid_idx_ = 0;
+                right_record_ = right_fh_->get_record(right_rids_[0], nullptr);
+                return;
+            }
+            // No match, advance left
+            find_next_match();
+            return;
+        }
+        
+        // Standard NLJ: find first matching right record
         right_->beginTuple();
         while (!right_->is_end()) {
             right_record_ = right_->Next();
             if (satisfy_join_cond(left_record_.get(), right_record_.get())) return;
             right_->nextTuple();
         }
-        // No match, advance left
         find_next_match();
     }
 

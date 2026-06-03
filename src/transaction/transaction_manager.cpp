@@ -166,6 +166,18 @@ void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
         }
     }
     
+    // Clear SSI dependency graph: 从所有活跃事务中移除本事务的依赖边
+    {
+        std::unique_lock<std::mutex> lock(latch_);
+        txn_id_t my_tid = txn->get_transaction_id();
+        for (auto &[tid, other_txn] : txn_map) {
+            if (tid == my_tid) continue;
+            // 从其他事务中删除指向本事务的边
+            other_txn->remove_in_edge(my_tid);
+            other_txn->remove_out_edge(my_tid);
+        }
+    }
+    
     // Release locks
     if (lock_manager_ != nullptr) {
         auto lock_set = txn->get_lock_set();
@@ -272,10 +284,8 @@ bool TransactionManager::check_rw_dependency(Transaction *txn, const Rid &rid, b
             if (cw.rid_key == key || is_range_scan) {
                 if (cw.commit_ts > my_start && cw.txn_id != txn->get_transaction_id()) {
                     // reader(us) ->rw-> writer(cw.txn_id)
-                    std::unique_lock<std::mutex> lk(latch_);
-                    auto it = txn_map.find(cw.txn_id);
-                    // Writer may have already completed; that's OK, dependency is recorded on us
-                    txn->set_rw_in(true);
+                    // Writer may have already completed; still record dependency on us
+                    txn->add_out_edge(cw.txn_id);
                     found_dep = true;
                 }
             }
@@ -297,8 +307,10 @@ bool TransactionManager::check_rw_dependency(Transaction *txn, const Rid &rid, b
                     }
                     if (other != nullptr && other->get_state() == TransactionState::GROWING) {
                         // reader(us) ->rw-> writer(other)
-                        other->set_rw_out(true);
-                        txn->set_rw_in(true);
+                        // other wrote data that we read → other gets in_edge from us
+                        // we read data that other wrote → we get out_edge to other
+                        other->add_in_edge(txn->get_transaction_id());
+                        txn->add_out_edge(other_tid);
                         found_dep = true;
                         // Check if other is now a pivot
                         if (other->is_ssi_pivot()) return true;
@@ -335,8 +347,9 @@ bool TransactionManager::check_dangerous_structure(Transaction *txn, const Rid &
         for (auto &read_rid : *read_set) {
             if (rid_to_key(read_rid) == key) {
                 // other_txn(read) ->rw-> txn(us, write)
-                other_txn->set_rw_in(true);
-                txn->set_rw_out(true);
+                // other_txn read data we're now writing → other depends on us
+                other_txn->add_out_edge(txn->get_transaction_id());
+                txn->add_in_edge(tid);
                 found_dep = true;
                 
                 // Check if either transaction became a pivot

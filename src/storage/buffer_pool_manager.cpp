@@ -159,6 +159,8 @@ bool BufferPoolManager::delete_page(PageId page_id) {
     page->is_dirty_ = false;
     page->pin_count_ = 0;
     free_list_.push_back(frame_id);
+    // 必须将frame从LRU替换器中移除，防止被当做牺牲页再次淘汰
+    replacer_->pin(frame_id);
     return true;
 }
 

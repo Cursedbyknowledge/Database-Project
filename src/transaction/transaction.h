@@ -63,9 +63,9 @@ class Transaction {
         index_latch_page_set_ = std::make_shared<std::deque<Page *>>();
         index_deleted_page_set_ = std::make_shared<std::deque<Page*>>();
         read_set_ = std::make_shared<std::vector<Rid>>();
-        // SSI dependency tracking
-        rw_dependency_in_ = false;   // Someone depends on this txn's write
-        rw_dependency_out_ = false;  // This txn depends on someone else's write
+        // SSI dependency tracking: edges (not just booleans)
+        in_edges_ = std::make_shared<std::unordered_set<txn_id_t>>();   // txns that read data we wrote
+        out_edges_ = std::make_shared<std::unordered_set<txn_id_t>>();  // txns that wrote data we read
         prev_lsn_ = INVALID_LSN;
         thread_id_ = std::this_thread::get_id();
     }
@@ -91,12 +91,18 @@ class Transaction {
     inline std::shared_ptr<std::vector<Rid>> get_read_set() { return read_set_; }
     inline void add_to_read_set(const Rid &rid) { read_set_->push_back(rid); }
 
-    // SSI dependency tracking
-    inline bool get_rw_in() const { return rw_dependency_in_; }
-    inline bool get_rw_out() const { return rw_dependency_out_; }
-    inline void set_rw_in(bool v) { rw_dependency_in_ = v; }
-    inline void set_rw_out(bool v) { rw_dependency_out_ = v; }
-    inline bool is_ssi_pivot() const { return rw_dependency_in_ && rw_dependency_out_; }
+    // SSI dependency tracking with edge sets
+    inline void add_in_edge(txn_id_t tid) { in_edges_->insert(tid); }
+    inline void add_out_edge(txn_id_t tid) { out_edges_->insert(tid); }
+    inline void remove_in_edge(txn_id_t tid) { in_edges_->erase(tid); }
+    inline void remove_out_edge(txn_id_t tid) { out_edges_->erase(tid); }
+    inline void clear_in_edges() { in_edges_->clear(); }
+    inline void clear_out_edges() { out_edges_->clear(); }
+    inline bool has_in_edges() const { return !in_edges_->empty(); }
+    inline bool has_out_edges() const { return !out_edges_->empty(); }
+    inline bool is_ssi_pivot() const { return has_in_edges() && has_out_edges(); }
+    inline std::shared_ptr<std::unordered_set<txn_id_t>> get_in_edges() { return in_edges_; }
+    inline std::shared_ptr<std::unordered_set<txn_id_t>> get_out_edges() { return out_edges_; }
 
     inline lsn_t get_prev_lsn() { return prev_lsn_; }
     inline void set_prev_lsn(lsn_t prev_lsn) { prev_lsn_ = prev_lsn; }
@@ -153,8 +159,8 @@ class Transaction {
     std::shared_ptr<std::deque<Page*>> index_latch_page_set_;          // 维护事务执行过程中加锁的索引页面
     std::shared_ptr<std::deque<Page*>> index_deleted_page_set_;    // 维护事务执行过程中删除的索引页面
     std::shared_ptr<std::vector<Rid>> read_set_;  // SSI read set tracking
-    bool rw_dependency_in_;   // Txn reads data that someone else wrote (this txn depends on another)
-    bool rw_dependency_out_;  // Someone else reads data that this txn wrote (another depends on this)
+    std::shared_ptr<std::unordered_set<txn_id_t>> in_edges_;   // txns that read what we wrote
+    std::shared_ptr<std::unordered_set<txn_id_t>> out_edges_;  // txns that wrote what we read
 
   std::atomic<timestamp_t> read_ts_{0};
   /** 提交时间戳 */
