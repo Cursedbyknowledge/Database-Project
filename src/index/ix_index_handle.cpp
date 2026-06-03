@@ -241,7 +241,6 @@ page_id_t IxIndexHandle::insert_entry(const char *key, const Rid &value, Transac
         return leaf_page_no;
     }
 
-    // 插入可能改变叶子最小键，必须同步更新父节点路由键
     maintain_parent(leaf);
 
     if (leaf->get_size() >= leaf->get_max_size()) {
@@ -270,7 +269,6 @@ bool IxIndexHandle::delete_entry(const char *key, Transaction *transaction) {
         return false;
     }
 
-    // 删除后若节点非空，更新父节点路由键
     if (leaf->get_size() > 0) {
         maintain_parent(leaf);
     }
@@ -302,8 +300,6 @@ bool IxIndexHandle::coalesce_or_redistribute(IxNodeHandle *node, Transaction *tr
         neighbor = fetch_node(parent->value_at(rank + 1));
     }
 
-    // 保存原始指针：coalesce中的swap会修改neighbor指向，导致后续unpin时错位
-    // 必须用fetched_neighbor来unpin，防止Buffer Pool引脚泄漏
     IxNodeHandle *fetched_neighbor = neighbor;
 
     bool res = false;
@@ -353,7 +349,6 @@ void IxIndexHandle::redistribute(IxNodeHandle *neighbor_node, IxNodeHandle *node
             maintain_child(node, node->get_size() - 1);
         }
     }
-    // 重分配后两个节点最小键都可能改变，必须同步更新父节点
     maintain_parent(node);
     maintain_parent(neighbor_node);
 }
@@ -392,7 +387,6 @@ bool IxIndexHandle::coalesce(IxNodeHandle **neighbor_node, IxNodeHandle **node, 
     par->erase_pair(index);
     release_node_handle(*right);
 
-    // 合并后左节点最小键可能改变，更新父节点路由键
     maintain_parent(left);
 
     if (par->is_root_page()) {
@@ -422,6 +416,13 @@ Iid IxIndexHandle::lower_bound(const char *key) {
     if (leaf == nullptr) return leaf_end();
     int pos = leaf->lower_bound(key);
     Iid iid = {.page_no = leaf->get_page_no(), .slot_no = pos};
+    
+    // 边界归一化：pos越界且非末页时，跳转到下一页首位
+    if (pos == leaf->get_size() && leaf->get_page_no() != file_hdr_->last_leaf_) {
+        iid.page_no = leaf->get_next_leaf();
+        iid.slot_no = 0;
+    }
+    
     buffer_pool_manager_->unpin_page(leaf->get_page_id(), false);
     delete leaf;
     return iid;
@@ -432,6 +433,13 @@ Iid IxIndexHandle::upper_bound(const char *key) {
     if (leaf == nullptr) return leaf_end();
     int pos = leaf->upper_bound(key);
     Iid iid = {.page_no = leaf->get_page_no(), .slot_no = pos};
+    
+    // 边界归一化
+    if (pos == leaf->get_size() && leaf->get_page_no() != file_hdr_->last_leaf_) {
+        iid.page_no = leaf->get_next_leaf();
+        iid.slot_no = 0;
+    }
+    
     buffer_pool_manager_->unpin_page(leaf->get_page_id(), false);
     delete leaf;
     return iid;
@@ -472,17 +480,27 @@ void IxIndexHandle::maintain_parent(IxNodeHandle *node) {
         int rank = parent->find_child(curr);
         char *parent_key = parent->get_key(rank);
         char *child_first_key = curr->get_key(0);
+        
         if (memcmp(parent_key, child_first_key, file_hdr_->col_tot_len_) == 0) {
             buffer_pool_manager_->unpin_page(parent->get_page_id(), true);
             delete parent;
             break;
         }
+        
         memcpy(parent_key, child_first_key, file_hdr_->col_tot_len_);
-        buffer_pool_manager_->unpin_page(parent->get_page_id(), true);
-        if (curr != node) delete curr;
+        
+        // 严禁提前unpin正在处理的节点！转让所有权后才清理旧curr
+        if (curr != node) {
+            buffer_pool_manager_->unpin_page(curr->get_page_id(), true);
+            delete curr;
+        }
         curr = parent;
     }
-    if (curr != node) delete curr;
+    
+    if (curr != node) {
+        buffer_pool_manager_->unpin_page(curr->get_page_id(), true);
+        delete curr;
+    }
 }
 
 void IxIndexHandle::erase_leaf(IxNodeHandle *leaf) {
