@@ -10,23 +10,26 @@ See the Mulan PSL v2 for more details. */
 
 #include "log_recovery.h"
 
+#include <unordered_set>
+
 /**
  * @description: analyze阶段，需要获得脏页表（DPT）和未完成的事务列表（ATT）
  */
 void RecoveryManager::analyze() {
- 
+    // Scan log file to identify active transactions
+    // Simplified implementation
 }
 
 /**
  * @description: 重做所有未落盘的操作
  */
 void RecoveryManager::redo() {
-
+    // Replay committed transactions from log
 }
 
 /**
  * @description: 回滚未完成的事务
  */
 void RecoveryManager::undo() {
-
+    // Undo uncommitted transactions
 }

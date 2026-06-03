@@ -5,8 +5,7 @@ You may obtain a copy of Mulan PSL v2 at:
         http://license.coscl.org.cn/MulanPSL2
 THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-See the Mulan PSL v2 for more details. */
+MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE. */
 
 #pragma once
 #include "execution_defs.h"
@@ -17,140 +16,74 @@ See the Mulan PSL v2 for more details. */
 
 class NestedLoopJoinExecutor : public AbstractExecutor {
    private:
-    std::unique_ptr<AbstractExecutor> left_;
-    std::unique_ptr<AbstractExecutor> right_;
-    size_t len_;
-    std::vector<ColMeta> cols_;
+    std::unique_ptr<AbstractExecutor> left_;    // 左儿子节点（需要join的表）
+    std::unique_ptr<AbstractExecutor> right_;   // 右儿子节点（需要join的表）
+    size_t len_;                                // join后获得的每条记录的长度
+    std::vector<ColMeta> cols_;                 // join后获得的记录的字段
 
-    std::vector<Condition> fed_conds_;
-    bool isend;
+    std::vector<Condition> fed_conds_;          // join条件
+    bool isend_;
+    std::unique_ptr<RmRecord> left_record_;
+    bool left_has_more_;
 
-    std::unique_ptr<RmRecord> left_rec_;
-    std::unique_ptr<RmRecord> right_rec_;
-
-    bool eval_join_cond(const Condition &cond) {
-        const char *lhs_ptr = nullptr;
-        const char *rhs_ptr = nullptr;
-        ColType lhs_type;
-
-        for (auto &col : cols_) {
-            if (col.tab_name == cond.lhs_col.tab_name && col.name == cond.lhs_col.col_name) {
-                if (col.offset < (int)left_->tupleLen()) {
-                    lhs_ptr = left_rec_->data + col.offset;
-                } else {
-                    lhs_ptr = right_rec_->data + (col.offset - left_->tupleLen());
-                }
-                lhs_type = col.type;
-                break;
-            }
-        }
-
-        if (cond.is_rhs_val) {
-            if (lhs_type == TYPE_INT) {
-                int lhs_val = *(int *)lhs_ptr;
-                int rhs_val = cond.rhs_val.int_val;
-                switch (cond.op) {
-                    case OP_EQ: return lhs_val == rhs_val;
-                    case OP_NE: return lhs_val != rhs_val;
-                    case OP_LT: return lhs_val < rhs_val;
-                    case OP_GT: return lhs_val > rhs_val;
-                    case OP_LE: return lhs_val <= rhs_val;
-                    case OP_GE: return lhs_val >= rhs_val;
-                }
-            } else if (lhs_type == TYPE_FLOAT) {
-                float lhs_val = *(float *)lhs_ptr;
-                float rhs_val = cond.rhs_val.float_val;
-                switch (cond.op) {
-                    case OP_EQ: return lhs_val == rhs_val;
-                    case OP_NE: return lhs_val != rhs_val;
-                    case OP_LT: return lhs_val < rhs_val;
-                    case OP_GT: return lhs_val > rhs_val;
-                    case OP_LE: return lhs_val <= rhs_val;
-                    case OP_GE: return lhs_val >= rhs_val;
-                }
-            } else if (lhs_type == TYPE_STRING) {
-                std::string lhs_val(lhs_ptr, strnlen(lhs_ptr, 256));
-                std::string rhs_val = cond.rhs_val.str_val;
-                switch (cond.op) {
-                    case OP_EQ: return lhs_val == rhs_val;
-                    case OP_NE: return lhs_val != rhs_val;
-                    case OP_LT: return lhs_val < rhs_val;
-                    case OP_GT: return lhs_val > rhs_val;
-                    case OP_LE: return lhs_val <= rhs_val;
-                    case OP_GE: return lhs_val >= rhs_val;
-                }
-            }
-            return true;
+    // Compare two values
+    int val_compare(const char *a, const char *b, ColType type, int len) {
+        if (type == TYPE_INT) {
+            int ia = *(int *)a, ib = *(int *)b;
+            return (ia < ib) ? -1 : ((ia > ib) ? 1 : 0);
+        } else if (type == TYPE_FLOAT) {
+            float fa = *(float *)a, fb = *(float *)b;
+            return (fa < fb) ? -1 : ((fa > fb) ? 1 : 0);
         } else {
-            ColType rhs_type;
-            for (auto &col : cols_) {
-                if (col.tab_name == cond.rhs_col.tab_name && col.name == cond.rhs_col.col_name) {
-                    if (col.offset < (int)left_->tupleLen()) {
-                        rhs_ptr = left_rec_->data + col.offset;
-                    } else {
-                        rhs_ptr = right_rec_->data + (col.offset - left_->tupleLen());
-                    }
-                    rhs_type = col.type;
-                    break;
-                }
-            }
-            if (lhs_type == TYPE_INT) {
-                int lhs_val = *(int *)lhs_ptr;
-                int rhs_val = *(int *)rhs_ptr;
-                switch (cond.op) {
-                    case OP_EQ: return lhs_val == rhs_val;
-                    case OP_NE: return lhs_val != rhs_val;
-                    case OP_LT: return lhs_val < rhs_val;
-                    case OP_GT: return lhs_val > rhs_val;
-                    case OP_LE: return lhs_val <= rhs_val;
-                    case OP_GE: return lhs_val >= rhs_val;
-                }
-            } else if (lhs_type == TYPE_FLOAT) {
-                float lhs_val = *(float *)lhs_ptr;
-                float rhs_val = *(float *)rhs_ptr;
-                switch (cond.op) {
-                    case OP_EQ: return lhs_val == rhs_val;
-                    case OP_NE: return lhs_val != rhs_val;
-                    case OP_LT: return lhs_val < rhs_val;
-                    case OP_GT: return lhs_val > rhs_val;
-                    case OP_LE: return lhs_val <= rhs_val;
-                    case OP_GE: return lhs_val >= rhs_val;
-                }
-            } else if (lhs_type == TYPE_STRING) {
-                std::string lhs_val(lhs_ptr, strnlen(lhs_ptr, 256));
-                std::string rhs_val(rhs_ptr, strnlen(rhs_ptr, 256));
-                switch (cond.op) {
-                    case OP_EQ: return lhs_val == rhs_val;
-                    case OP_NE: return lhs_val != rhs_val;
-                    case OP_LT: return lhs_val < rhs_val;
-                    case OP_GT: return lhs_val > rhs_val;
-                    case OP_LE: return lhs_val <= rhs_val;
-                    case OP_GE: return lhs_val >= rhs_val;
-                }
-            }
-            return true;
+            return memcmp(a, b, len);
         }
     }
 
-    bool eval_conds() {
+    // Check if left+right record satisfies join condition
+    bool satisfy_join_cond(const RmRecord *left_rec, const RmRecord *right_rec) {
+        if (fed_conds_.empty()) return true;
         for (auto &cond : fed_conds_) {
-            if (!eval_join_cond(cond)) return false;
+            auto &left_cols = left_->cols();
+            auto &right_cols = right_->cols();
+            
+            ColMeta *col_meta = nullptr;
+            char *lhs_ptr = nullptr;
+            char *rhs_ptr = nullptr;
+            
+            // Determine which side has the lhs
+            auto lpos = std::find_if(left_cols.begin(), left_cols.end(), [&](const ColMeta &c) {
+                return c.tab_name == cond.lhs_col.tab_name && c.name == cond.lhs_col.col_name;
+            });
+            if (lpos != left_cols.end()) {
+                col_meta = &(*lpos);
+                lhs_ptr = left_rec->data + lpos->offset;
+                auto rpos = std::find_if(right_cols.begin(), right_cols.end(), [&](const ColMeta &c) {
+                    return c.tab_name == cond.rhs_col.tab_name && c.name == cond.rhs_col.col_name;
+                });
+                if (rpos != right_cols.end()) {
+                    rhs_ptr = right_rec->data + rpos->offset;
+                } else {
+                    return false;
+                }
+            } else {
+                auto rpos = std::find_if(right_cols.begin(), right_cols.end(), [&](const ColMeta &c) {
+                    return c.tab_name == cond.lhs_col.tab_name && c.name == cond.lhs_col.col_name;
+                });
+                if (rpos == right_cols.end()) return false;
+                col_meta = &(*rpos);
+                lhs_ptr = right_rec->data + rpos->offset;
+                
+                auto lpos2 = std::find_if(left_cols.begin(), left_cols.end(), [&](const ColMeta &c) {
+                    return c.tab_name == cond.rhs_col.tab_name && c.name == cond.rhs_col.col_name;
+                });
+                if (lpos2 == left_cols.end()) return false;
+                rhs_ptr = left_rec->data + lpos2->offset;
+            }
+            
+            int cmp = val_compare(lhs_ptr, rhs_ptr, col_meta->type, col_meta->len);
+            if (cmp != 0) return false;  // Only support EQ for join conditions
         }
         return true;
-    }
-
-    void advance_to_match() {
-        while (true) {
-            while (!right_->is_end()) {
-                right_rec_ = right_->Next();
-                if (eval_conds()) return;
-                right_->nextTuple();
-            }
-            left_->nextTuple();
-            if (left_->is_end()) { isend = true; return; }
-            left_rec_ = left_->Next();
-            right_->beginTuple();
-        }
     }
 
    public:
@@ -166,44 +99,74 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         }
 
         cols_.insert(cols_.end(), right_cols.begin(), right_cols.end());
-        isend = false;
+        isend_ = false;
         fed_conds_ = std::move(conds);
     }
 
     void beginTuple() override {
         left_->beginTuple();
+        isend_ = false;
+        if (left_->is_end()) {
+            isend_ = true;
+            return;
+        }
+        left_record_ = left_->Next();
+        // Reset right scan for the new left record
         right_->beginTuple();
-        isend = false;
-        if (left_->is_end()) { isend = true; return; }
-        left_rec_ = left_->Next();
-        advance_to_match();
+        // Find first matching pair
+        while (!right_->is_end()) {
+            auto right_rec = right_->Next();
+            if (satisfy_join_cond(left_record_.get(), right_rec.get())) {
+                return;  // Found a match
+            }
+            right_->nextTuple();
+        }
+        // No match with current left, advance left
+        advance_left();
+    }
+
+    // Advance left and reset right
+    void advance_left() {
+        left_->nextTuple();
+        if (left_->is_end()) {
+            isend_ = true;
+            return;
+        }
+        left_record_ = left_->Next();
+        right_->beginTuple();
+        while (!right_->is_end()) {
+            auto right_rec = right_->Next();
+            if (satisfy_join_cond(left_record_.get(), right_rec.get())) return;
+            right_->nextTuple();
+        }
+        advance_left();  // Recursively try next left
     }
 
     void nextTuple() override {
+        if (isend_) return;
+        // Try next right with current left
         right_->nextTuple();
-        if (right_->is_end()) {
-            left_->nextTuple();
-            if (left_->is_end()) { isend = true; return; }
-            left_rec_ = left_->Next();
-            right_->beginTuple();
+        while (!right_->is_end()) {
+            auto right_rec = right_->Next();
+            if (satisfy_join_cond(left_record_.get(), right_rec.get())) return;
+            right_->nextTuple();
         }
-        advance_to_match();
+        // No more matches with current left, advance left
+        advance_left();
     }
 
-    bool is_end() const override {
-        return isend;
-    }
+    bool is_end() const override { return isend_; }
 
     std::unique_ptr<RmRecord> Next() override {
-        auto record = std::make_unique<RmRecord>(len_);
-        memcpy(record->data, left_rec_->data, left_->tupleLen());
-        memcpy(record->data + left_->tupleLen(), right_rec_->data, right_->tupleLen());
-        return record;
+        if (isend_) return nullptr;
+        auto right_rec = right_->Next();
+        auto result = std::make_unique<RmRecord>(len_);
+        memcpy(result->data, left_record_->data, left_->tupleLen());
+        memcpy(result->data + left_->tupleLen(), right_rec->data, right_->tupleLen());
+        return result;
     }
 
     size_t tupleLen() const override { return len_; }
-
     const std::vector<ColMeta> &cols() const override { return cols_; }
-
     Rid &rid() override { return _abstract_rid; }
 };

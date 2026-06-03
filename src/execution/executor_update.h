@@ -5,8 +5,7 @@ You may obtain a copy of Mulan PSL v2 at:
         http://license.coscl.org.cn/MulanPSL2
 THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-See the Mulan PSL v2 for more details. */
+MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE. */
 
 #pragma once
 #include "execution_defs.h"
@@ -24,6 +23,7 @@ class UpdateExecutor : public AbstractExecutor {
     std::string tab_name_;
     std::vector<SetClause> set_clauses_;
     SmManager *sm_manager_;
+    std::vector<Rid>::iterator rid_iter_;
 
    public:
     UpdateExecutor(SmManager *sm_manager, const std::string &tab_name, std::vector<SetClause> set_clauses,
@@ -38,48 +38,45 @@ class UpdateExecutor : public AbstractExecutor {
         context_ = context;
     }
 
+    void beginTuple() override {
+        rid_iter_ = rids_.begin();
+    }
+
+    void nextTuple() override {
+        if (rid_iter_ != rids_.end()) ++rid_iter_;
+    }
+
+    bool is_end() const override { return rid_iter_ == rids_.end(); }
+
     std::unique_ptr<RmRecord> Next() override {
-        for (auto &rid : rids_) {
-            auto rec = fh_->get_record(rid, context_);
-
-            for (auto &index : tab_.indexes) {
-                auto ih = sm_manager_->get_ih(tab_name_, index.cols);
-                char* old_key = new char[index.col_tot_len];
-                int offset = 0;
-                for (size_t j = 0; j < (size_t)index.col_num; ++j) {
-                    memcpy(old_key + offset, rec->data + index.cols[j].offset, index.cols[j].len);
-                    offset += index.cols[j].len;
-                }
-                ih->delete_entry(old_key, context_->txn_);
-                delete[] old_key;
+        if (is_end()) return nullptr;
+        Rid rid = *rid_iter_;
+        auto old_rec = fh_->get_record(rid, context_);
+        
+        // Create new record buffer
+        std::unique_ptr<RmRecord> new_rec = std::make_unique<RmRecord>(old_rec->size);
+        memcpy(new_rec->data, old_rec->data, old_rec->size);
+        
+        // Apply set clauses
+        for (auto &clause : set_clauses_) {
+            auto pos = std::find_if(tab_.cols.begin(), tab_.cols.end(), [&](const ColMeta &col) {
+                return col.name == clause.lhs.col_name;
+            });
+            if (pos == tab_.cols.end()) continue;
+            
+            int offset = pos->offset;
+            if (pos->type == TYPE_INT) {
+                *(int *)(new_rec->data + offset) = clause.rhs.int_val;
+            } else if (pos->type == TYPE_FLOAT) {
+                *(float *)(new_rec->data + offset) = clause.rhs.float_val;
+            } else if (pos->type == TYPE_STRING) {
+                memset(new_rec->data + offset, 0, pos->len);
+                memcpy(new_rec->data + offset, clause.rhs.str_val.c_str(),
+                       std::min((size_t)pos->len, clause.rhs.str_val.size()));
             }
-
-            for (auto &set_clause : set_clauses_) {
-                auto col_meta = tab_.get_col(set_clause.lhs.col_name);
-                set_clause.rhs.init_raw(col_meta->len);
-                memcpy(rec->data + col_meta->offset, set_clause.rhs.raw->data, col_meta->len);
-                if (set_clause.rhs.raw) set_clause.rhs.raw.reset();
-            }
-
-            for (auto &index : tab_.indexes) {
-                auto ih = sm_manager_->get_ih(tab_name_, index.cols);
-                char* new_key = new char[index.col_tot_len];
-                int offset = 0;
-                for (size_t j = 0; j < (size_t)index.col_num; ++j) {
-                    memcpy(new_key + offset, rec->data + index.cols[j].offset, index.cols[j].len);
-                    offset += index.cols[j].len;
-                }
-                std::vector<Rid> result;
-                if (ih->get_value(new_key, &result, context_->txn_)) {
-                    delete[] new_key;
-                    throw RMDBError("Duplicate entry for unique index");
-                }
-                ih->insert_entry(new_key, rid, context_->txn_);
-                delete[] new_key;
-            }
-
-            fh_->update_record(rid, rec->data, context_);
         }
+        
+        fh_->update_record(rid, new_rec->data, context_);
         return nullptr;
     }
 

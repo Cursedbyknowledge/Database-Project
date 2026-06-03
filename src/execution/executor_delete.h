@@ -5,8 +5,7 @@ You may obtain a copy of Mulan PSL v2 at:
         http://license.coscl.org.cn/MulanPSL2
 THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-See the Mulan PSL v2 for more details. */
+MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE. */
 
 #pragma once
 #include "execution_defs.h"
@@ -17,12 +16,13 @@ See the Mulan PSL v2 for more details. */
 
 class DeleteExecutor : public AbstractExecutor {
    private:
-    TabMeta tab_;
-    std::vector<Condition> conds_;
-    RmFileHandle *fh_;
-    std::vector<Rid> rids_;
-    std::string tab_name_;
+    TabMeta tab_;                   // 表的元数据
+    std::vector<Condition> conds_;  // delete的条件
+    RmFileHandle *fh_;              // 表的数据文件句柄
+    std::vector<Rid> rids_;         // 需要删除的记录的位置
+    std::string tab_name_;          // 表名称
     SmManager *sm_manager_;
+    std::vector<Rid>::iterator rid_iter_;
 
    public:
     DeleteExecutor(SmManager *sm_manager, const std::string &tab_name, std::vector<Condition> conds,
@@ -36,24 +36,20 @@ class DeleteExecutor : public AbstractExecutor {
         context_ = context;
     }
 
+    void beginTuple() override {
+        rid_iter_ = rids_.begin();
+    }
+
+    void nextTuple() override {
+        if (rid_iter_ != rids_.end()) ++rid_iter_;
+    }
+
+    bool is_end() const override { return rid_iter_ == rids_.end(); }
+
     std::unique_ptr<RmRecord> Next() override {
-        for (auto &rid : rids_) {
-            auto rec = fh_->get_record(rid, context_);
-
-            for (auto &index : tab_.indexes) {
-                auto ih = sm_manager_->get_ih(tab_name_, index.cols);
-                char* key = new char[index.col_tot_len];
-                int offset = 0;
-                for (size_t j = 0; j < (size_t)index.col_num; ++j) {
-                    memcpy(key + offset, rec->data + index.cols[j].offset, index.cols[j].len);
-                    offset += index.cols[j].len;
-                }
-                ih->delete_entry(key, context_->txn_);
-                delete[] key;
-            }
-
-            fh_->delete_record(rid, context_);
-        }
+        if (is_end()) return nullptr;
+        Rid rid = *rid_iter_;
+        fh_->delete_record(rid, context_);
         return nullptr;
     }
 
