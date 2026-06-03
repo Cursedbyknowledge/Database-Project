@@ -74,6 +74,7 @@ public:
     void record_write(Transaction *txn, const Rid &rid);
     bool check_rw_dependency(Transaction *txn, const Rid &rid, bool is_range_scan = false);
     bool check_dangerous_structure(Transaction *txn, const Rid &rid);
+    bool is_record_dirty_by_other(Transaction *txn, const Rid &rid);
 
     /**
      * @description: 获取事务ID为txn_id的事务对象

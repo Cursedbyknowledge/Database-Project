@@ -60,10 +60,31 @@ void RmFileHandle::insert_record(const Rid& rid, char* buf) {
     page_handle.page_hdr->num_records++;
     char* slot = page_handle.get_slot(rid.slot_no);
     memcpy(slot, buf, file_hdr_.record_size);
-    buffer_pool_manager_->unpin_page(page_handle.page->get_page_id(), true);
+
+    // 修复：页面变满时，需要正确处理空闲链表摘除（该页面可能在链表任意位置）
     if (page_handle.page_hdr->num_records == file_hdr_.num_records_per_page) {
-        file_hdr_.first_free_page_no = page_handle.page_hdr->next_free_page_no;
+        int target_page = rid.page_no;
+        if (file_hdr_.first_free_page_no == target_page) {
+            // 头节点：直接后移
+            file_hdr_.first_free_page_no = page_handle.page_hdr->next_free_page_no;
+        } else if (file_hdr_.first_free_page_no != RM_NO_PAGE) {
+            // 遍历链表找到前驱节点
+            int prev = RM_NO_PAGE;
+            int curr = file_hdr_.first_free_page_no;
+            while (curr != RM_NO_PAGE && curr != target_page) {
+                RmPageHandle curr_handle = fetch_page_handle(curr);
+                prev = curr;
+                curr = curr_handle.page_hdr->next_free_page_no;
+                buffer_pool_manager_->unpin_page(curr_handle.page->get_page_id(), false);
+            }
+            if (curr == target_page && prev != RM_NO_PAGE) {
+                RmPageHandle prev_handle = fetch_page_handle(prev);
+                prev_handle.page_hdr->next_free_page_no = page_handle.page_hdr->next_free_page_no;
+                buffer_pool_manager_->unpin_page(prev_handle.page->get_page_id(), true);
+            }
+        }
     }
+    buffer_pool_manager_->unpin_page(page_handle.page->get_page_id(), true);
 }
 
 /**

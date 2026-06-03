@@ -63,6 +63,9 @@ class Transaction {
         index_latch_page_set_ = std::make_shared<std::deque<Page *>>();
         index_deleted_page_set_ = std::make_shared<std::deque<Page*>>();
         read_set_ = std::make_shared<std::vector<Rid>>();
+        // SSI dependency tracking
+        rw_dependency_in_ = false;   // Someone depends on this txn's write
+        rw_dependency_out_ = false;  // This txn depends on someone else's write
         prev_lsn_ = INVALID_LSN;
         thread_id_ = std::this_thread::get_id();
     }
@@ -87,6 +90,13 @@ class Transaction {
 
     inline std::shared_ptr<std::vector<Rid>> get_read_set() { return read_set_; }
     inline void add_to_read_set(const Rid &rid) { read_set_->push_back(rid); }
+
+    // SSI dependency tracking
+    inline bool get_rw_in() const { return rw_dependency_in_; }
+    inline bool get_rw_out() const { return rw_dependency_out_; }
+    inline void set_rw_in(bool v) { rw_dependency_in_ = v; }
+    inline void set_rw_out(bool v) { rw_dependency_out_ = v; }
+    inline bool is_ssi_pivot() const { return rw_dependency_in_ && rw_dependency_out_; }
 
     inline lsn_t get_prev_lsn() { return prev_lsn_; }
     inline void set_prev_lsn(lsn_t prev_lsn) { prev_lsn_ = prev_lsn; }
@@ -143,6 +153,8 @@ class Transaction {
     std::shared_ptr<std::deque<Page*>> index_latch_page_set_;          // 维护事务执行过程中加锁的索引页面
     std::shared_ptr<std::deque<Page*>> index_deleted_page_set_;    // 维护事务执行过程中删除的索引页面
     std::shared_ptr<std::vector<Rid>> read_set_;  // SSI read set tracking
+    bool rw_dependency_in_;   // Txn reads data that someone else wrote (this txn depends on another)
+    bool rw_dependency_out_;  // Someone else reads data that this txn wrote (another depends on this)
 
   std::atomic<timestamp_t> read_ts_{0};
   /** 提交时间戳 */

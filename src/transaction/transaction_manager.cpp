@@ -224,110 +224,131 @@ void TransactionManager::record_write(Transaction *txn, const Rid &rid) {
     record_writers[key].insert(txn->get_transaction_id());
 }
 
+/**
+ * Check if a record has been modified by an uncommitted transaction.
+ * Used by read path to detect dirty reads under SI/SER.
+ * The caller should treat this as a visibility issue:
+ * - Under SI: the record is not yet committed, so read the old version
+ * - Under SER: this may create a rw-dependency
+ */
+bool TransactionManager::is_record_dirty_by_other(Transaction *txn, const Rid &rid) {
+    int64_t key = rid_to_key(rid);
+    std::unique_lock<std::mutex> lock(write_set_mutex);
+    auto it = record_writers.find(key);
+    if (it != record_writers.end()) {
+        for (auto other_tid : it->second) {
+            if (other_tid != txn->get_transaction_id()) {
+                // Check if the other transaction is still active (uncommitted)
+                std::unique_lock<std::mutex> lk(latch_);
+                auto mit = txn_map.find(other_tid);
+                if (mit != txn_map.end() && mit->second->get_state() == TransactionState::GROWING) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 // ========== SSI Dependency Tracking ==========
 
 /**
  * Check if reading this record creates a rw-dependency for SSI.
- * When T reads a record that was written by another committed transaction 
- * after T's start_ts, this creates a dependency.
+ * reader ->rw-> writer: reader's snapshot doesn't include writer's changes.
+ * Sets reader's rw_dependency_in_ and writer's rw_dependency_out_.
+ * If reader becomes a pivot (both in and out), signal dangerous structure.
  */
 bool TransactionManager::check_rw_dependency(Transaction *txn, const Rid &rid, bool is_range_scan) {
     if (txn->get_isolation_level() != IsolationLevel::SERIALIZABLE) return false;
     
     int64_t key = rid_to_key(rid);
     timestamp_t my_start = txn->get_start_ts();
+    bool found_dep = false;
     
-    std::unique_lock<std::mutex> lock(committed_writes_mutex);
-    for (auto &cw : committed_writes) {
-        if (cw.rid_key == key || is_range_scan) {
-            if (cw.commit_ts > my_start && cw.txn_id != txn->get_transaction_id()) {
-                // Committed write after our snapshot - rw dependency
-                // reader(us) -> rw -> writer(cw.txn_id)
-                return true;  // Returns true = dependency exists
+    // Check committed writes newer than our snapshot
+    {
+        std::unique_lock<std::mutex> lock(committed_writes_mutex);
+        for (auto &cw : committed_writes) {
+            if (cw.rid_key == key || is_range_scan) {
+                if (cw.commit_ts > my_start && cw.txn_id != txn->get_transaction_id()) {
+                    // reader(us) ->rw-> writer(cw.txn_id)
+                    std::unique_lock<std::mutex> lk(latch_);
+                    auto it = txn_map.find(cw.txn_id);
+                    // Writer may have already completed; that's OK, dependency is recorded on us
+                    txn->set_rw_in(true);
+                    found_dep = true;
+                }
             }
         }
     }
     
-    // Also check active writers
+    // Check active writers
     {
         std::unique_lock<std::mutex> wl(write_set_mutex);
         auto it = record_writers.find(key);
         if (it != record_writers.end()) {
             for (auto other_tid : it->second) {
                 if (other_tid != txn->get_transaction_id()) {
-                    Transaction *other = get_transaction(other_tid);
+                    Transaction *other = nullptr;
+                    {
+                        std::unique_lock<std::mutex> lk(latch_);
+                        auto mit = txn_map.find(other_tid);
+                        if (mit != txn_map.end()) other = mit->second;
+                    }
                     if (other != nullptr && other->get_state() == TransactionState::GROWING) {
-                        // Active writer - rw dependency possible
-                        return true;
+                        // reader(us) ->rw-> writer(other)
+                        other->set_rw_out(true);
+                        txn->set_rw_in(true);
+                        found_dep = true;
+                        // Check if other is now a pivot
+                        if (other->is_ssi_pivot()) return true;
                     }
                 }
             }
         }
     }
     
+    // After reading, signal if WE became a pivot
+    if (found_dep && txn->is_ssi_pivot()) return true;
     return false;
 }
 
 /**
  * Check if writing creates a rw-dependency for SSI that forms a dangerous structure.
- * When T writes a record, check if other transactions have read data that
- * would be affected.
+ * When T writes, check if any other txn has read data that T is now modifying.
+ * reader ->rw-> writer(us)
  */
 bool TransactionManager::check_dangerous_structure(Transaction *txn, const Rid &rid) {
     if (txn->get_isolation_level() != IsolationLevel::SERIALIZABLE) return false;
     
-    // Simplified SSI dangerous structure detection:
-    // If there's a cycle in rw-dependencies involving this write,
-    // return true (need to abort)
-    // 
-    // For test scenarios, the key pattern is:
-    // T1 reads R2, T2 reads R1, T1 writes R1, T2 writes R2
-    // → T1->rw->T2 and T2->rw->T1 forms a dangerous structure
-    
     int64_t key = rid_to_key(rid);
+    bool found_dep = false;
     
-    // Check if any other active serializable transaction has read a record
-    // that we're now modifying
     std::unique_lock<std::mutex> lock(latch_);
     for (auto &[tid, other_txn] : txn_map) {
         if (tid == txn->get_transaction_id()) continue;
         if (other_txn->get_state() != TransactionState::GROWING) continue;
         if (other_txn->get_isolation_level() != IsolationLevel::SERIALIZABLE) continue;
         
-        // Check if other_txn has read this record
+        // Check if other_txn has read the record we're now writing
         auto read_set = other_txn->get_read_set();
         for (auto &read_rid : *read_set) {
             if (rid_to_key(read_rid) == key) {
-                // other_txn read this record → other_txn ->rw-> txn(us)
-                // Now check if we have also read something other_txn wrote
-                auto our_read_set = txn->get_read_set();
-                auto other_write_set = other_txn->get_write_set();
-                for (auto *wr : *other_write_set) {
-                    int64_t wr_key = rid_to_key(wr->GetRid());
-                    for (auto &our_read : *our_read_set) {
-                        if (rid_to_key(our_read) == wr_key) {
-                            // We read what other wrote → txn(us) ->rw-> other_txn
-                            // Cycle detected!
-                            return true;
-                        }
-                    }
-                }
-                // Even without a cycle yet, record this dependency
-                // The write statement that creates the second edge causes abort
-                // Check if other_txn has a dependency on us already
-                for (auto *wr : *other_write_set) {
-                    int64_t wr_key = rid_to_key(wr->GetRid());
-                    for (auto &our_read : *our_read_set) {
-                        if (rid_to_key(our_read) == wr_key) {
-                            return true;  // Dangerous structure
-                        }
-                    }
-                }
+                // other_txn(read) ->rw-> txn(us, write)
+                other_txn->set_rw_in(true);
+                txn->set_rw_out(true);
+                found_dep = true;
+                
+                // Check if either transaction became a pivot
+                if (other_txn->is_ssi_pivot()) return true;
+                if (txn->is_ssi_pivot()) return true;
+                break;
             }
         }
+        if (found_dep) break;  // One dependency edge is enough per write
     }
     
-    return false;
+    return false;  // No dangerous structure yet
 }
 
 // ========== MVCC Stubs (not needed for basic functionality) ==========

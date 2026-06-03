@@ -152,7 +152,7 @@ bool BufferPoolManager::delete_page(PageId page_id) {
     if (page->pin_count_ > 0) {
         return false;
     }
-    disk_manager_->write_page(page->id_.fd, page->id_.page_no, page->get_data(), PAGE_SIZE);
+    // 已删除的页面无需刷盘，避免无效I/O
     page_table_.erase(it);
     page->reset_memory();
     page->id_.page_no = INVALID_PAGE_ID;
