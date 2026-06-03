@@ -23,6 +23,8 @@ See the Mulan PSL v2 for more details. */
 #include "execution/executor_insert.h"
 #include "execution/executor_delete.h"
 #include "execution/execution_sort.h"
+#include "execution/executor_aggregation.h"
+#include "execution/executor_union.h"
 #include "common/common.h"
 
 typedef enum portalTag{
@@ -175,6 +177,23 @@ class Portal
         } else if(auto x = std::dynamic_pointer_cast<SortPlan>(plan)) {
             return std::make_unique<SortExecutor>(convert_plan_executor(x->subplan_, context), 
                                             x->sel_col_, x->is_desc_);
+        } else if(auto x = std::dynamic_pointer_cast<AggregationPlan>(plan)) {
+            auto prev = convert_plan_executor(x->subplan_, context);
+            // Build aggregation column info from child columns
+            std::vector<AggregationExecutor::AggColInfo> agg_cols;
+            auto &prev_cols = prev->cols();
+            for (size_t i = 0; i < prev_cols.size(); i++) {
+                AggregationExecutor::AggColInfo info;
+                info.src_idx = i;
+                info.func = AGG_COUNT_ALL;
+                info.is_count_star = true;
+                agg_cols.push_back(info);
+            }
+            return std::make_unique<AggregationExecutor>(std::move(prev), x->group_by_cols_, agg_cols);
+        } else if(auto x = std::dynamic_pointer_cast<UnionPlan>(plan)) {
+            return std::make_unique<UnionExecutor>(convert_plan_executor(x->left_, context),
+                                                   convert_plan_executor(x->right_, context),
+                                                   x->is_all_);
         }
         return nullptr;
     }

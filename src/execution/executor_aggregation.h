@@ -23,18 +23,14 @@ enum AggFuncType {
 };
 
 class AggregationExecutor : public AbstractExecutor {
-   private:
-    std::unique_ptr<AbstractExecutor> prev_;
-    std::vector<ColMeta> cols_;        // output columns
-    size_t len_;
-    bool done_;
-
+   public:
     // Aggregation configuration
     struct AggColInfo {
         size_t src_idx;      // index in prev columns
         AggFuncType func;
         bool is_count_star;
     };
+   private:
     std::vector<AggColInfo> agg_cols_;
     std::vector<std::string> group_by_cols_;
 
