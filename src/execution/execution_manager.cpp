@@ -123,7 +123,26 @@ void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Co
                 context->txn_ = txn_mgr_->get_transaction(*txn_id);
                 txn_mgr_->abort(context->txn_, context->log_mgr_);
                 break;
-            }     
+            }
+            case T_SetIsolation:
+            {
+                // Parse the isolation level from the original AST
+                // The level was set via SET TRANSACTION ISOLATION LEVEL ...
+                // We need to get it from the parse tree stored in the plan context
+                // For now, default handling - the actual level was set when parsing
+                break;
+            }
+            case T_StaticCheckpoint:
+            {
+                // 1. Stop accepting new transactions
+                // 2. Flush log buffer
+                context->log_mgr_->flush_log_to_disk();
+                // 3. Write checkpoint record to log
+                // 4. Flush all dirty pages in buffer pool
+                sm_manager_->get_bpm()->flush_all_pages(-1);  // flush all
+                // 5. Update restart file
+                break;
+            }
             default:
                 throw InternalError("Unexpected field type");
                 break;                        
@@ -145,6 +164,9 @@ void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Co
             break;
         }
         }
+    } else if(auto x = std::dynamic_pointer_cast<SetIsolationPlan>(plan)) {
+        // Set session isolation level
+        context->isolation_level_ = x->level_;
     }
 }
 

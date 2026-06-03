@@ -109,7 +109,13 @@ extern int yydebug;
     GROUP = 310,                   /* GROUP  */
     HAVING = 311,                  /* HAVING  */
     UNION = 312,                   /* UNION  */
-    ALL = 313                      /* ALL  */
+    ALL = 313,                    /* ALL  */
+    TRANSACTION = 314,            /* TRANSACTION  */
+    ISOLATION = 315,              /* ISOLATION  */
+    LEVEL = 316,                  /* LEVEL  */
+    SNAPSHOT = 317,               /* SNAPSHOT  */
+    SERIALIZABLE = 318,           /* SERIALIZABLE  */
+    STATIC_CHECKPOINT = 319       /* STATIC_CHECKPOINT  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif

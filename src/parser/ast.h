@@ -13,6 +13,8 @@ See the Mulan PSL v2 for more details. */
 #include <string>
 #include <memory>
 
+#include "transaction/txn_defs.h"
+
 enum JoinType {
     INNER_JOIN, LEFT_JOIN, RIGHT_JOIN, FULL_JOIN
 };
@@ -276,6 +278,17 @@ struct UnionStmt : public TreeNode {
 
     UnionStmt(std::shared_ptr<TreeNode> left_, std::shared_ptr<TreeNode> right_, bool is_all_)
         : left(std::move(left_)), right(std::move(right_)), is_all(is_all_) {}
+};
+
+// SET TRANSACTION ISOLATION LEVEL statement
+struct SetIsolationStmt : public TreeNode {
+    IsolationLevel level;
+
+    SetIsolationStmt(IsolationLevel level_) : level(level_) {}
+};
+
+// CREATE STATIC_CHECKPOINT statement
+struct StaticCheckpointStmt : public TreeNode {
 };
 
 // Semantic value

@@ -24,7 +24,8 @@ public:
     Context (LockManager *lock_mgr, LogManager *log_mgr, 
             Transaction *txn, char *data_send = nullptr, int *offset = &const_offset)
         : lock_mgr_(lock_mgr), log_mgr_(log_mgr), txn_(txn),
-          data_send_(data_send), offset_(offset) {
+          data_send_(data_send), offset_(offset), 
+          isolation_level_(IsolationLevel::SERIALIZABLE) {
             ellipsis_ = false;
           }
 
@@ -35,4 +36,5 @@ public:
     char *data_send_;
     int *offset_;
     bool ellipsis_;
+    IsolationLevel isolation_level_;  // session isolation level
 };

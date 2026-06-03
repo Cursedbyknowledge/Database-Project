@@ -61,6 +61,7 @@ void SetTransaction(txn_id_t *txn_id, Context *context) {
         context->txn_ = txn_manager->begin(nullptr, context->log_mgr_);
         *txn_id = context->txn_->get_transaction_id();
         context->txn_->set_txn_mode(false);
+        context->txn_->set_isolation_level(context->isolation_level_);
     }
 }
 

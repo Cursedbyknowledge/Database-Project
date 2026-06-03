@@ -69,6 +69,12 @@ public:
 
     LockManager* get_lock_manager() { return lock_manager_; }
 
+    // MVCC + SSI methods
+    bool check_write_conflict(Transaction *txn, const Rid &rid);
+    void record_write(Transaction *txn, const Rid &rid);
+    bool check_rw_dependency(Transaction *txn, const Rid &rid, bool is_range_scan = false);
+    bool check_dangerous_structure(Transaction *txn, const Rid &rid);
+
     /**
      * @description: 获取事务ID为txn_id的事务对象
      * @return {Transaction*} 事务对象的指针

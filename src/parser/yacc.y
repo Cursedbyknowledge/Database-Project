@@ -25,6 +25,7 @@ using namespace ast;
 %token WHERE UPDATE SET SELECT INT CHAR FLOAT INDEX AND JOIN EXIT HELP TXN_BEGIN TXN_COMMIT TXN_ABORT TXN_ROLLBACK ORDER_BY ENABLE_NESTLOOP ENABLE_SORTMERGE
 %token NOT NULL_TOKEN UNIQUE PRIMARY KEY
 %token COUNT SUM_TOKEN AVG MIN MAX GROUP HAVING UNION ALL
+%token TRANSACTION ISOLATION LEVEL SNAPSHOT SERIALIZABLE STATIC_CHECKPOINT
 // non-keywords
 %token LEQ NEQ GEQ T_EOF
 
@@ -90,6 +91,26 @@ stmt:
     |   dml
     |   txnStmt
     |   setStmt
+    |   setIsolationStmt
+    |   checkpointStmt
+    ;
+
+setIsolationStmt:
+        SET TRANSACTION ISOLATION LEVEL SNAPSHOT ISOLATION
+    {
+        $$ = std::make_shared<SetIsolationStmt>(IsolationLevel::SNAPSHOT_ISOLATION);
+    }
+    |   SET TRANSACTION ISOLATION LEVEL SERIALIZABLE
+    {
+        $$ = std::make_shared<SetIsolationStmt>(IsolationLevel::SERIALIZABLE);
+    }
+    ;
+
+checkpointStmt:
+        CREATE STATIC_CHECKPOINT
+    {
+        $$ = std::make_shared<StaticCheckpointStmt>();
+    }
     ;
 
 txnStmt:

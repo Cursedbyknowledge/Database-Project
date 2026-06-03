@@ -62,6 +62,7 @@ class Transaction {
         lock_set_ = std::make_shared<std::unordered_set<LockDataId>>();
         index_latch_page_set_ = std::make_shared<std::deque<Page *>>();
         index_deleted_page_set_ = std::make_shared<std::deque<Page*>>();
+        read_set_ = std::make_shared<std::vector<Rid>>();
         prev_lsn_ = INVALID_LSN;
         thread_id_ = std::this_thread::get_id();
     }
@@ -79,9 +80,13 @@ class Transaction {
     inline timestamp_t get_start_ts() { return start_ts_; }
 
     inline IsolationLevel get_isolation_level() { return isolation_level_; }
+    inline void set_isolation_level(IsolationLevel level) { isolation_level_ = level; }
 
     inline TransactionState get_state() { return state_; }
     inline void set_state(TransactionState state) { state_ = state; }
+
+    inline std::shared_ptr<std::vector<Rid>> get_read_set() { return read_set_; }
+    inline void add_to_read_set(const Rid &rid) { read_set_->push_back(rid); }
 
     inline lsn_t get_prev_lsn() { return prev_lsn_; }
     inline void set_prev_lsn(lsn_t prev_lsn) { prev_lsn_ = prev_lsn; }
@@ -137,6 +142,7 @@ class Transaction {
     std::shared_ptr<std::unordered_set<LockDataId>> lock_set_;  // 事务申请的所有锁
     std::shared_ptr<std::deque<Page*>> index_latch_page_set_;          // 维护事务执行过程中加锁的索引页面
     std::shared_ptr<std::deque<Page*>> index_deleted_page_set_;    // 维护事务执行过程中删除的索引页面
+    std::shared_ptr<std::vector<Rid>> read_set_;  // SSI read set tracking
 
   std::atomic<timestamp_t> read_ts_{0};
   /** 提交时间戳 */

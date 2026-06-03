@@ -99,6 +99,12 @@ single_op ";"|"("|")"|","|"*"|"="|">"|"<"|"."
 "HAVING" { return HAVING; }
 "UNION" { return UNION; }
 "ALL" { return ALL; }
+"TRANSACTION" { return TRANSACTION; }
+"ISOLATION" { return ISOLATION; }
+"LEVEL" { return LEVEL; }
+"SNAPSHOT" { return SNAPSHOT; }
+"SERIALIZABLE" { return SERIALIZABLE; }
+"STATIC_CHECKPOINT" { return STATIC_CHECKPOINT; }
 "ENABLE_NESTLOOP" { return ENABLE_NESTLOOP; }
 "ENABLE_SORTMERGE" { return ENABLE_SORTMERGE; }
 "TRUE" { 

@@ -45,7 +45,9 @@ typedef enum PlanTag{
     T_Sort,
     T_Projection,
     T_Aggregation,
-    T_Union
+    T_Union,
+    T_SetIsolation,
+    T_StaticCheckpoint
 } PlanTag;
 
 // 查询执行计划
@@ -231,6 +233,16 @@ class SetKnobPlan : public Plan
         }
     ast::SetKnobType set_knob_type_;
     bool bool_value_;
+};
+
+// Set Isolation Level Plan
+class SetIsolationPlan : public Plan
+{
+    public:
+        SetIsolationPlan(IsolationLevel level) : level_(level) {
+            Plan::tag = T_SetIsolation;
+        }
+        IsolationLevel level_;
 };
 
 class plannerInfo{
