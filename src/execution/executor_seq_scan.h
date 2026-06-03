@@ -79,7 +79,7 @@ class SeqScanExecutor : public AbstractExecutor {
         TabMeta &tab = sm_manager_->db_.get_table(tab_name_);
         fh_ = sm_manager_->fhs_.at(tab_name_).get();
         cols_ = tab.cols;
-        len_ = cols_.back().offset + cols_.back().len;
+        len_ = cols_.empty() ? 0 : (cols_.back().offset + cols_.back().len);
 
         context_ = context;
 
