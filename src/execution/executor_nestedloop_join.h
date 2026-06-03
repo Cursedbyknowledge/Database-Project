@@ -16,17 +16,16 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE. */
 
 class NestedLoopJoinExecutor : public AbstractExecutor {
    private:
-    std::unique_ptr<AbstractExecutor> left_;    // 左儿子节点（需要join的表）
-    std::unique_ptr<AbstractExecutor> right_;   // 右儿子节点（需要join的表）
-    size_t len_;                                // join后获得的每条记录的长度
-    std::vector<ColMeta> cols_;                 // join后获得的记录的字段
+    std::unique_ptr<AbstractExecutor> left_;
+    std::unique_ptr<AbstractExecutor> right_;
+    size_t len_;
+    std::vector<ColMeta> cols_;
 
-    std::vector<Condition> fed_conds_;          // join条件
+    std::vector<Condition> fed_conds_;
     bool isend_;
     std::unique_ptr<RmRecord> left_record_;
-    bool left_has_more_;
+    std::unique_ptr<RmRecord> right_record_;  // cached right record for Next()
 
-    // Compare two values
     int val_compare(const char *a, const char *b, ColType type, int len) {
         if (type == TYPE_INT) {
             int ia = *(int *)a, ib = *(int *)b;
@@ -39,40 +38,38 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         }
     }
 
-    // Check if left+right record satisfies join condition
+    // Check if left+right pair satisfies join condition (only EQ supported)
     bool satisfy_join_cond(const RmRecord *left_rec, const RmRecord *right_rec) {
         if (fed_conds_.empty()) return true;
         for (auto &cond : fed_conds_) {
             auto &left_cols = left_->cols();
             auto &right_cols = right_->cols();
             
-            ColMeta *col_meta = nullptr;
             char *lhs_ptr = nullptr;
             char *rhs_ptr = nullptr;
+            ColType col_type = TYPE_INT;
+            int col_len = 0;
             
-            // Determine which side has the lhs
             auto lpos = std::find_if(left_cols.begin(), left_cols.end(), [&](const ColMeta &c) {
                 return c.tab_name == cond.lhs_col.tab_name && c.name == cond.lhs_col.col_name;
             });
             if (lpos != left_cols.end()) {
-                col_meta = &(*lpos);
+                col_type = lpos->type;
+                col_len = lpos->len;
                 lhs_ptr = left_rec->data + lpos->offset;
                 auto rpos = std::find_if(right_cols.begin(), right_cols.end(), [&](const ColMeta &c) {
                     return c.tab_name == cond.rhs_col.tab_name && c.name == cond.rhs_col.col_name;
                 });
-                if (rpos != right_cols.end()) {
-                    rhs_ptr = right_rec->data + rpos->offset;
-                } else {
-                    return false;
-                }
+                if (rpos == right_cols.end()) return false;
+                rhs_ptr = right_rec->data + rpos->offset;
             } else {
                 auto rpos = std::find_if(right_cols.begin(), right_cols.end(), [&](const ColMeta &c) {
                     return c.tab_name == cond.lhs_col.tab_name && c.name == cond.lhs_col.col_name;
                 });
                 if (rpos == right_cols.end()) return false;
-                col_meta = &(*rpos);
+                col_type = rpos->type;
+                col_len = rpos->len;
                 lhs_ptr = right_rec->data + rpos->offset;
-                
                 auto lpos2 = std::find_if(left_cols.begin(), left_cols.end(), [&](const ColMeta &c) {
                     return c.tab_name == cond.rhs_col.tab_name && c.name == cond.rhs_col.col_name;
                 });
@@ -80,10 +77,40 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
                 rhs_ptr = left_rec->data + lpos2->offset;
             }
             
-            int cmp = val_compare(lhs_ptr, rhs_ptr, col_meta->type, col_meta->len);
-            if (cmp != 0) return false;  // Only support EQ for join conditions
+            int cmp = val_compare(lhs_ptr, rhs_ptr, col_type, col_len);
+            if (cmp != 0) return false;
         }
         return true;
+    }
+
+    // Find next matching right record for current left, or advance left if exhausted
+    // Returns false if no more matches at all
+    bool find_next_match() {
+        while (true) {
+            // Try next right with current left
+            right_->nextTuple();
+            if (!right_->is_end()) {
+                right_record_ = right_->Next();
+                if (satisfy_join_cond(left_record_.get(), right_record_.get())) return true;
+                continue;
+            }
+            // Right exhausted, advance left
+            left_->nextTuple();
+            if (left_->is_end()) {
+                isend_ = true;
+                return false;
+            }
+            left_record_ = left_->Next();
+            right_->beginTuple();
+            if (!right_->is_end()) {
+                right_record_ = right_->Next();
+                if (satisfy_join_cond(left_record_.get(), right_record_.get())) return true;
+                continue;
+            }
+            // Right is empty
+            isend_ = true;
+            return false;
+        }
     }
 
    public:
@@ -97,72 +124,40 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         for (auto &col : right_cols) {
             col.offset += left_->tupleLen();
         }
-
         cols_.insert(cols_.end(), right_cols.begin(), right_cols.end());
         isend_ = false;
         fed_conds_ = std::move(conds);
     }
 
     void beginTuple() override {
-        left_->beginTuple();
         isend_ = false;
-        if (left_->is_end()) {
-            isend_ = true;
-            return;
-        }
+        left_->beginTuple();
+        if (left_->is_end()) { isend_ = true; return; }
         left_record_ = left_->Next();
-        // Reset right scan for the new left record
-        right_->beginTuple();
-        // Find first matching pair
-        while (!right_->is_end()) {
-            auto right_rec = right_->Next();
-            if (satisfy_join_cond(left_record_.get(), right_rec.get())) {
-                return;  // Found a match
-            }
-            right_->nextTuple();
-        }
-        // No match with current left, advance left
-        advance_left();
-    }
-
-    // Advance left and reset right
-    void advance_left() {
-        left_->nextTuple();
-        if (left_->is_end()) {
-            isend_ = true;
-            return;
-        }
-        left_record_ = left_->Next();
+        
+        // Find first matching right record
         right_->beginTuple();
         while (!right_->is_end()) {
-            auto right_rec = right_->Next();
-            if (satisfy_join_cond(left_record_.get(), right_rec.get())) return;
+            right_record_ = right_->Next();
+            if (satisfy_join_cond(left_record_.get(), right_record_.get())) return;
             right_->nextTuple();
         }
-        advance_left();  // Recursively try next left
+        // No match, advance left
+        find_next_match();
     }
 
     void nextTuple() override {
         if (isend_) return;
-        // Try next right with current left
-        right_->nextTuple();
-        while (!right_->is_end()) {
-            auto right_rec = right_->Next();
-            if (satisfy_join_cond(left_record_.get(), right_rec.get())) return;
-            right_->nextTuple();
-        }
-        // No more matches with current left, advance left
-        advance_left();
+        find_next_match();
     }
 
     bool is_end() const override { return isend_; }
 
     std::unique_ptr<RmRecord> Next() override {
         if (isend_) return nullptr;
-        auto right_rec = right_->Next();
         auto result = std::make_unique<RmRecord>(len_);
         memcpy(result->data, left_record_->data, left_->tupleLen());
-        memcpy(result->data + left_->tupleLen(), right_rec->data, right_->tupleLen());
+        memcpy(result->data + left_->tupleLen(), right_record_->data, right_->tupleLen());
         return result;
     }
 

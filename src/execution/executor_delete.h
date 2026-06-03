@@ -16,11 +16,11 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE. */
 
 class DeleteExecutor : public AbstractExecutor {
    private:
-    TabMeta tab_;                   // 表的元数据
-    std::vector<Condition> conds_;  // delete的条件
-    RmFileHandle *fh_;              // 表的数据文件句柄
-    std::vector<Rid> rids_;         // 需要删除的记录的位置
-    std::string tab_name_;          // 表名称
+    TabMeta tab_;
+    std::vector<Condition> conds_;
+    RmFileHandle *fh_;
+    std::vector<Rid> rids_;
+    std::string tab_name_;
     SmManager *sm_manager_;
     std::vector<Rid>::iterator rid_iter_;
 
@@ -45,11 +45,42 @@ class DeleteExecutor : public AbstractExecutor {
     }
 
     bool is_end() const override { return rid_iter_ == rids_.end(); }
+    size_t tupleLen() const override { return 0; }
+    const std::vector<ColMeta> &cols() const override { return tab_.cols; }
 
     std::unique_ptr<RmRecord> Next() override {
         if (is_end()) return nullptr;
         Rid rid = *rid_iter_;
+        
+        // Get old record for rollback and index deletion
+        auto old_rec = fh_->get_record(rid, context_);
+        
+        // Delete index entries first
+        for (size_t i = 0; i < tab_.indexes.size(); ++i) {
+            auto& index = tab_.indexes[i];
+            std::string ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);
+            if (sm_manager_->ihs_.count(ix_name)) {
+                auto ih = sm_manager_->ihs_.at(ix_name).get();
+                char* key = new char[index.col_tot_len];
+                int offset = 0;
+                for (size_t j = 0; j < (size_t)index.col_num; ++j) {
+                    memcpy(key + offset, old_rec->data + index.cols[j].offset, index.cols[j].len);
+                    offset += index.cols[j].len;
+                }
+                ih->delete_entry(key, context_->txn_);
+                delete[] key;
+            }
+        }
+        
+        // Record write for transaction rollback
+        if (context_->txn_ != nullptr) {
+            WriteRecord *wr = new WriteRecord(WType::DELETE_TUPLE, tab_name_, rid, *old_rec);
+            context_->txn_->append_write_record(wr);
+        }
+        
+        // Delete the record
         fh_->delete_record(rid, context_);
+        
         return nullptr;
     }
 

@@ -163,5 +163,9 @@ class IndexScanExecutor : public AbstractExecutor {
 
     size_t tupleLen() const override { return len_; }
     const std::vector<ColMeta> &cols() const override { return cols_; }
+    ColMeta get_col_offset(const TabCol &target) override {
+        auto pos = get_col(cols_, target);
+        return *pos;
+    }
     Rid &rid() override { return rid_; }
 };
