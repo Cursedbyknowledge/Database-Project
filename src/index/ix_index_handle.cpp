@@ -241,6 +241,9 @@ page_id_t IxIndexHandle::insert_entry(const char *key, const Rid &value, Transac
         return leaf_page_no;
     }
 
+    // 插入可能改变叶子最小键，必须同步更新父节点路由键
+    maintain_parent(leaf);
+
     if (leaf->get_size() >= leaf->get_max_size()) {
         IxNodeHandle *new_leaf = split(leaf);
         const char *new_key = new_leaf->get_key(0);
@@ -267,6 +270,11 @@ bool IxIndexHandle::delete_entry(const char *key, Transaction *transaction) {
         return false;
     }
 
+    // 删除后若节点非空，更新父节点路由键
+    if (leaf->get_size() > 0) {
+        maintain_parent(leaf);
+    }
+
     bool root_is_latched_out = false;
     coalesce_or_redistribute(leaf, transaction, &root_is_latched_out);
 
@@ -281,7 +289,6 @@ bool IxIndexHandle::coalesce_or_redistribute(IxNodeHandle *node, Transaction *tr
     }
 
     if (node->get_size() >= node->get_min_size()) {
-        maintain_parent(node);
         return false;
     }
 
@@ -295,6 +302,10 @@ bool IxIndexHandle::coalesce_or_redistribute(IxNodeHandle *node, Transaction *tr
         neighbor = fetch_node(parent->value_at(rank + 1));
     }
 
+    // 保存原始指针：coalesce中的swap会修改neighbor指向，导致后续unpin时错位
+    // 必须用fetched_neighbor来unpin，防止Buffer Pool引脚泄漏
+    IxNodeHandle *fetched_neighbor = neighbor;
+
     bool res = false;
     if (node->get_size() + neighbor->get_size() >= node->get_max_size()) {
         redistribute(neighbor, node, parent, rank);
@@ -303,8 +314,8 @@ bool IxIndexHandle::coalesce_or_redistribute(IxNodeHandle *node, Transaction *tr
         res = coalesce(&neighbor, &node, &parent, rank, transaction, root_is_latched);
     }
 
-    buffer_pool_manager_->unpin_page(neighbor->get_page_id(), true);
-    delete neighbor;
+    buffer_pool_manager_->unpin_page(fetched_neighbor->get_page_id(), true);
+    delete fetched_neighbor;
     buffer_pool_manager_->unpin_page(parent->get_page_id(), true);
     delete parent;
     return res;
@@ -332,20 +343,19 @@ void IxIndexHandle::redistribute(IxNodeHandle *neighbor_node, IxNodeHandle *node
         int neighbor_last = neighbor_node->get_size() - 1;
         node->insert_pair(0, neighbor_node->get_key(neighbor_last), *neighbor_node->get_rid(neighbor_last));
         neighbor_node->erase_pair(neighbor_last);
-        parent->set_key(index, node->get_key(0));
         if (!node->is_leaf_page()) {
             maintain_child(node, 0);
         }
     } else {
         node->insert_pair(node->get_size(), neighbor_node->get_key(0), *neighbor_node->get_rid(0));
         neighbor_node->erase_pair(0);
-        if (neighbor_node->get_size() > 0) {
-            parent->set_key(1, neighbor_node->get_key(0));
-        }
         if (!node->is_leaf_page()) {
             maintain_child(node, node->get_size() - 1);
         }
     }
+    // 重分配后两个节点最小键都可能改变，必须同步更新父节点
+    maintain_parent(node);
+    maintain_parent(neighbor_node);
 }
 
 bool IxIndexHandle::coalesce(IxNodeHandle **neighbor_node, IxNodeHandle **node, IxNodeHandle **parent, int index,
@@ -381,6 +391,9 @@ bool IxIndexHandle::coalesce(IxNodeHandle **neighbor_node, IxNodeHandle **node, 
 
     par->erase_pair(index);
     release_node_handle(*right);
+
+    // 合并后左节点最小键可能改变，更新父节点路由键
+    maintain_parent(left);
 
     if (par->is_root_page()) {
         return adjust_root(par);
