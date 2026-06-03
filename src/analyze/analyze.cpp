@@ -22,16 +22,17 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
     {
         // 处理表名
         query->tables = std::move(x->tabs);
-        /** TODO: 检查表是否存在 */
 
-        // 处理target list，再target list中添加上表名，例如 a.id
+        // 处理target list
         for (auto &sv_sel_col : x->cols) {
             TabCol sel_col = {.tab_name = sv_sel_col->tab_name, .col_name = sv_sel_col->col_name};
             query->cols.push_back(sel_col);
         }
         
         std::vector<ColMeta> all_cols;
-        get_all_cols(query->tables, all_cols);
+        if (!query->tables.empty()) {
+            get_all_cols(query->tables, all_cols);
+        }
         if (query->cols.empty()) {
             // select all columns
             for (auto &col : all_cols) {
@@ -39,14 +40,22 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
                 query->cols.push_back(sel_col);
             }
         } else {
-            // infer table name from column name
             for (auto &sel_col : query->cols) {
-                sel_col = check_column(all_cols, sel_col);  // 列元数据校验
+                if (sel_col.col_name == "*") continue;
+                if (sel_col.tab_name.empty() && !all_cols.empty()) {
+                    sel_col = check_column(all_cols, sel_col);
+                }
             }
         }
         //处理where条件
         get_clause(x->conds, query->conds);
         check_clause(query->tables, query->conds);
+    } else if (auto x = std::dynamic_pointer_cast<ast::UnionStmt>(parse)) {
+        // UNION: analyze left query
+        std::shared_ptr<Query> left_q = do_analyze(x->left);
+        query->tables = left_q->tables;
+        query->cols = left_q->cols;
+        query->conds = left_q->conds;
     } else if (auto x = std::dynamic_pointer_cast<ast::UpdateStmt>(parse)) {
         // UPDATE analysis
         query->tables.push_back(x->tab_name);

@@ -36,6 +36,10 @@ enum SetKnobType {
     EnableNestLoop, EnableSortMerge
 };
 
+enum AggType {
+    AGG_COUNT, AGG_SUM, AGG_AVG, AGG_MIN, AGG_MAX
+};
+
 // Base class for tree nodes
 struct TreeNode {
     virtual ~TreeNode() = default;  // enable polymorphism
@@ -228,16 +232,21 @@ struct SelectStmt : public TreeNode {
 
     
     bool has_sort;
+    bool has_group;
     std::shared_ptr<OrderBy> order;
+    std::vector<std::string> group_by_cols;
+    std::vector<std::shared_ptr<BinaryExpr>> having_conds;
 
 
     SelectStmt(std::vector<std::shared_ptr<Col>> cols_,
                std::vector<std::string> tabs_,
                std::vector<std::shared_ptr<BinaryExpr>> conds_,
-               std::shared_ptr<OrderBy> order_) :
+               std::shared_ptr<OrderBy> order_,
+               std::vector<std::string> group_by_ = {}) :
             cols(std::move(cols_)), tabs(std::move(tabs_)), conds(std::move(conds_)), 
-            order(std::move(order_)) {
+            order(std::move(order_)), group_by_cols(std::move(group_by_)) {
                 has_sort = (bool)order;
+                has_group = !group_by_cols.empty();
             }
 };
 
@@ -248,6 +257,25 @@ struct SetStmt : public TreeNode {
 
     SetStmt(SetKnobType &type, bool bool_value) : 
         set_knob_type_(type), bool_val_(bool_value) { }
+};
+
+// Aggregation column (e.g., COUNT(*), SUM(col))
+struct AggCol : public Col {
+    AggType agg_type;
+    bool distinct;
+
+    AggCol(AggType agg_type_, std::shared_ptr<Col> col_, bool distinct_)
+        : Col(col_->tab_name, col_->col_name), agg_type(agg_type_), distinct(distinct_) {}
+};
+
+// UNION statement
+struct UnionStmt : public TreeNode {
+    std::shared_ptr<TreeNode> left;
+    std::shared_ptr<TreeNode> right;
+    bool is_all;
+
+    UnionStmt(std::shared_ptr<TreeNode> left_, std::shared_ptr<TreeNode> right_, bool is_all_)
+        : left(std::move(left_)), right(std::move(right_)), is_all(is_all_) {}
 };
 
 // Semantic value
@@ -283,6 +311,8 @@ struct SemValue {
     std::vector<std::shared_ptr<BinaryExpr>> sv_conds;
 
     std::shared_ptr<OrderBy> sv_orderby;
+    
+    std::shared_ptr<AggCol> sv_agg;
 
     SetKnobType sv_setKnobType;
 };
