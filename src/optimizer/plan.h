@@ -23,7 +23,6 @@ typedef enum PlanTag{
     T_Invalid = 1,
     T_Help,
     T_ShowTable,
-    T_ShowIndex,
     T_DescTable,
     T_CreateTable,
     T_DropTable,
@@ -43,11 +42,7 @@ typedef enum PlanTag{
     T_NestLoop,
     T_SortMerge,    // sort merge join
     T_Sort,
-    T_Projection,
-    T_Aggregation,
-    T_Union,
-    T_SetIsolation,
-    T_StaticCheckpoint
+    T_Projection
 } PlanTag;
 
 // 查询执行计划
@@ -138,37 +133,6 @@ class SortPlan : public Plan
         
 };
 
-class AggregationPlan : public Plan
-{
-    public:
-        AggregationPlan(PlanTag tag, std::shared_ptr<Plan> subplan, 
-                       std::vector<std::string> group_by_cols)
-        {
-            Plan::tag = tag;
-            subplan_ = std::move(subplan);
-            group_by_cols_ = std::move(group_by_cols);
-        }
-        ~AggregationPlan(){}
-        std::shared_ptr<Plan> subplan_;
-        std::vector<std::string> group_by_cols_;
-};
-
-class UnionPlan : public Plan
-{
-    public:
-        UnionPlan(PlanTag tag, std::shared_ptr<Plan> left, std::shared_ptr<Plan> right, bool is_all)
-        {
-            Plan::tag = tag;
-            left_ = std::move(left);
-            right_ = std::move(right);
-            is_all_ = is_all;
-        }
-        ~UnionPlan(){}
-        std::shared_ptr<Plan> left_;
-        std::shared_ptr<Plan> right_;
-        bool is_all_;
-};
-
 // dml语句，包括insert; delete; update; select语句　
 class DMLPlan : public Plan
 {
@@ -233,16 +197,6 @@ class SetKnobPlan : public Plan
         }
     ast::SetKnobType set_knob_type_;
     bool bool_value_;
-};
-
-// Set Isolation Level Plan
-class SetIsolationPlan : public Plan
-{
-    public:
-        SetIsolationPlan(IsolationLevel level) : level_(level) {
-            Plan::tag = T_SetIsolation;
-        }
-        IsolationLevel level_;
 };
 
 class plannerInfo{

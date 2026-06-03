@@ -85,26 +85,6 @@ single_op ";"|"("|")"|","|"*"|"="|">"|"<"|"."
 "ORDER" { return ORDER; }
 "BY" {  return BY;  }
 "ASC" { return ASC; }
-"NOT" { return NOT; }
-"NULL" { return NULL_TOKEN; }
-"UNIQUE" { return UNIQUE; }
-"PRIMARY" { return PRIMARY; }
-"KEY" { return KEY; }
-"COUNT" { return COUNT; }
-"SUM" { return SUM_TOKEN; }
-"AVG" { return AVG; }
-"MIN" { return MIN; }
-"MAX" { return MAX; }
-"GROUP" { return GROUP; }
-"HAVING" { return HAVING; }
-"UNION" { return UNION; }
-"ALL" { return ALL; }
-"TRANSACTION" { return TRANSACTION; }
-"ISOLATION" { return ISOLATION; }
-"LEVEL" { return LEVEL; }
-"SNAPSHOT" { return SNAPSHOT; }
-"SERIALIZABLE" { return SERIALIZABLE; }
-"STATIC_CHECKPOINT" { return STATIC_CHECKPOINT; }
 "ENABLE_NESTLOOP" { return ENABLE_NESTLOOP; }
 "ENABLE_SORTMERGE" { return ENABLE_SORTMERGE; }
 "TRUE" { 

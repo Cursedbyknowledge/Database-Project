@@ -22,10 +22,7 @@ using namespace ast;
 
 // keywords
 %token SHOW TABLES CREATE TABLE DROP DESC INSERT INTO VALUES DELETE FROM ASC ORDER BY
-%token WHERE UPDATE SET SELECT INT CHAR FLOAT INDEX AND JOIN EXIT HELP TXN_BEGIN TXN_COMMIT TXN_ABORT TXN_ROLLBACK ORDER_BY ENABLE_NESTLOOP ENABLE_SORTMERGE
-%token NOT NULL_TOKEN UNIQUE PRIMARY KEY
-%token COUNT SUM_TOKEN AVG MIN MAX GROUP HAVING UNION ALL
-%token TRANSACTION ISOLATION LEVEL SNAPSHOT SERIALIZABLE STATIC_CHECKPOINT
+WHERE UPDATE SET SELECT INT CHAR FLOAT INDEX AND JOIN EXIT HELP TXN_BEGIN TXN_COMMIT TXN_ABORT TXN_ROLLBACK ORDER_BY ENABLE_NESTLOOP ENABLE_SORTMERGE
 // non-keywords
 %token LEQ NEQ GEQ T_EOF
 
@@ -36,7 +33,7 @@ using namespace ast;
 %token <sv_bool> VALUE_BOOL
 
 // specify types for non-terminal symbol
-%type <sv_node> stmt dbStmt ddl dml txnStmt setStmt query
+%type <sv_node> stmt dbStmt ddl dml txnStmt setStmt
 %type <sv_field> field
 %type <sv_fields> fieldList
 %type <sv_type_len> type
@@ -55,11 +52,6 @@ using namespace ast;
 %type <sv_orderby>  order_clause opt_order_clause
 %type <sv_orderby_dir> opt_asc_desc
 %type <sv_setKnobType> set_knob_type
-%type <sv_agg> agg_func
-%type <sv_col> sel_elem
-%type <sv_cols> sel_list
-%type <sv_strs> group_by_clause
-%type <sv_bool> opt_all
 
 %%
 start:
@@ -91,26 +83,6 @@ stmt:
     |   dml
     |   txnStmt
     |   setStmt
-    |   setIsolationStmt
-    |   checkpointStmt
-    ;
-
-setIsolationStmt:
-        SET TRANSACTION ISOLATION LEVEL SNAPSHOT ISOLATION
-    {
-        $$ = std::make_shared<SetIsolationStmt>(IsolationLevel::SNAPSHOT_ISOLATION);
-    }
-    |   SET TRANSACTION ISOLATION LEVEL SERIALIZABLE
-    {
-        $$ = std::make_shared<SetIsolationStmt>(IsolationLevel::SERIALIZABLE);
-    }
-    ;
-
-checkpointStmt:
-        CREATE STATIC_CHECKPOINT
-    {
-        $$ = std::make_shared<StaticCheckpointStmt>();
-    }
     ;
 
 txnStmt:
@@ -136,10 +108,6 @@ dbStmt:
         SHOW TABLES
     {
         $$ = std::make_shared<ShowTables>();
-    }
-    |   SHOW INDEX FROM tbName
-    {
-        $$ = std::make_shared<ShowIndex>($4);
     }
     ;
 
@@ -186,17 +154,9 @@ dml:
     {
         $$ = std::make_shared<UpdateStmt>($2, $4, $5);
     }
-    |   query
-    ;
-
-query:
-        SELECT sel_list FROM tableList optWhereClause opt_group_by opt_order_clause
+    |   SELECT selector FROM tableList optWhereClause opt_order_clause
     {
-        $$ = std::make_shared<SelectStmt>($2, $4, $5, $7, $6);
-    }
-    |   query UNION opt_all query
-    {
-        $$ = std::make_shared<UnionStmt>($1, $5, $3);
+        $$ = std::make_shared<SelectStmt>($2, $4, $5, $6);
     }
     ;
 
@@ -223,29 +183,9 @@ colNameList:
     ;
 
 field:
-        colName type opt_field_constraints
+        colName type
     {
         $$ = std::make_shared<ColDef>($1, $2);
-    }
-    ;
-
-opt_field_constraints:
-        /* empty */
-    |   opt_field_constraints field_constraint
-    ;
-
-field_constraint:
-        NOT NULL_TOKEN
-    {
-        // NOT NULL constraint - stored in ColDef if needed
-    }
-    |   UNIQUE
-    {
-        // UNIQUE constraint - creates unique index
-    }
-    |   PRIMARY KEY
-    {
-        // PRIMARY KEY constraint
     }
     ;
 
@@ -342,56 +282,6 @@ colList:
     }
     ;
 
-sel_list:
-        sel_elem
-    {
-        $$ = std::vector<std::shared_ptr<Col>>{$1};
-    }
-    |   sel_list ',' sel_elem
-    {
-        $$.push_back($3);
-    }
-    ;
-
-sel_elem:
-        col
-    {
-        $$ = $1;
-    }
-    |   agg_func
-    {
-        // Aggregation function - wrap in Col with special marker
-        $$ = $1;
-    }
-    ;
-
-agg_func:
-        COUNT '(' '*' ')'
-    {
-        $$ = std::make_shared<AggCol>(AGG_COUNT, std::make_shared<Col>("", "*"), false);
-    }
-    |   COUNT '(' col ')'
-    {
-        $$ = std::make_shared<AggCol>(AGG_COUNT, $3, false);
-    }
-    |   SUM_TOKEN '(' col ')'
-    {
-        $$ = std::make_shared<AggCol>(AGG_SUM, $3, false);
-    }
-    |   AVG '(' col ')'
-    {
-        $$ = std::make_shared<AggCol>(AGG_AVG, $3, false);
-    }
-    |   MIN '(' col ')'
-    {
-        $$ = std::make_shared<AggCol>(AGG_MIN, $3, false);
-    }
-    |   MAX '(' col ')'
-    {
-        $$ = std::make_shared<AggCol>(AGG_MAX, $3, false);
-    }
-    ;
-
 op:
         '='
     {
@@ -471,28 +361,12 @@ tableList:
     }
     ;
 
-opt_group_by:
-        /* empty */
-    |   GROUP BY colNameList opt_having
-    {
-        // GROUP BY columns stored for later use
-    }
-    ;
-
-opt_having:
-        /* empty */
-    |   HAVING whereClause
-    {
-        // HAVING clause
-    }
-    ;
-
 opt_order_clause:
     ORDER BY order_clause      
     { 
         $$ = $3; 
     }
-    |   /* epsilon */ { $$ = nullptr; }
+    |   /* epsilon */ { /* ignore*/ }
     ;
 
 order_clause:
@@ -507,11 +381,6 @@ opt_asc_desc:
     |  DESC      { $$ = OrderBy_DESC;    }
     |       { $$ = OrderBy_DEFAULT; }
     ;    
-
-opt_all:
-        /* empty */ { $$ = false; }
-    |   ALL { $$ = true; }
-    ;
 
 set_knob_type:
     ENABLE_NESTLOOP { $$ = EnableNestLoop; }

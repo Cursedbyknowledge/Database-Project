@@ -41,9 +41,6 @@ class Optimizer {
         } else if (auto x = std::dynamic_pointer_cast<ast::DescTable>(query->parse)) {
             // desc table;
             return std::make_shared<OtherPlan>(T_DescTable, x->tab_name);
-        } else if (auto x = std::dynamic_pointer_cast<ast::ShowIndex>(query->parse)) {
-            // show index from table;
-            return std::make_shared<OtherPlan>(T_ShowIndex, x->tab_name);
         } else if (auto x = std::dynamic_pointer_cast<ast::TxnBegin>(query->parse)) {
             // begin;
             return std::make_shared<OtherPlan>(T_Transaction_begin, std::string());
@@ -59,12 +56,6 @@ class Optimizer {
         } else if (auto x = std::dynamic_pointer_cast<ast::SetStmt>(query->parse)) {
             // Set Knob Plan
             return std::make_shared<SetKnobPlan>(x->set_knob_type_, x->bool_val_);
-        } else if (auto x = std::dynamic_pointer_cast<ast::SetIsolationStmt>(query->parse)) {
-            // SET TRANSACTION ISOLATION LEVEL
-            return std::make_shared<SetIsolationPlan>(x->level);
-        } else if (auto x = std::dynamic_pointer_cast<ast::StaticCheckpointStmt>(query->parse)) {
-            // CREATE STATIC_CHECKPOINT
-            return std::make_shared<OtherPlan>(T_StaticCheckpoint, std::string());
         } else {
             return planner_->do_planner(query, context);
         }

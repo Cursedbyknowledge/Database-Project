@@ -362,3 +362,20 @@ void SmManager::drop_index(const std::string& tab_name, const std::vector<ColMet
     }
     drop_index(tab_name, col_names, context);
 }
+
+void SmManager::show_index_from(const std::string& tab_name, Context* context) {
+    if (!db_.is_table(tab_name)) {
+        throw TableNotFoundError(tab_name);
+    }
+    TabMeta &tab = db_.get_table(tab_name);
+    std::fstream outfile;
+    outfile.open("output.txt", std::ios::out | std::ios::app);
+    for (auto &index : tab.indexes) {
+        outfile << "| " << tab_name << " |";
+        for (auto &col : index.cols) {
+            outfile << " " << col.name;
+        }
+        outfile << " |\n";
+    }
+    outfile.close();
+}

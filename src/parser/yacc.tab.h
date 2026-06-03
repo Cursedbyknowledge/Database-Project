@@ -95,27 +95,7 @@ extern int yydebug;
     VALUE_STRING = 296,            /* VALUE_STRING  */
     VALUE_INT = 297,               /* VALUE_INT  */
     VALUE_FLOAT = 298,             /* VALUE_FLOAT  */
-    VALUE_BOOL = 299,              /* VALUE_BOOL  */
-    NOT = 300,                     /* NOT  */
-    NULL_TOKEN = 301,              /* NULL_TOKEN  */
-    UNIQUE = 302,                  /* UNIQUE  */
-    PRIMARY = 303,                 /* PRIMARY  */
-    KEY = 304,                     /* KEY  */
-    COUNT = 305,                   /* COUNT  */
-    SUM_TOKEN = 306,               /* SUM_TOKEN  */
-    AVG = 307,                     /* AVG  */
-    MIN = 308,                     /* MIN  */
-    MAX = 309,                     /* MAX  */
-    GROUP = 310,                   /* GROUP  */
-    HAVING = 311,                  /* HAVING  */
-    UNION = 312,                   /* UNION  */
-    ALL = 313,                    /* ALL  */
-    TRANSACTION = 314,            /* TRANSACTION  */
-    ISOLATION = 315,              /* ISOLATION  */
-    LEVEL = 316,                  /* LEVEL  */
-    SNAPSHOT = 317,               /* SNAPSHOT  */
-    SERIALIZABLE = 318,           /* SERIALIZABLE  */
-    STATIC_CHECKPOINT = 319       /* STATIC_CHECKPOINT  */
+    VALUE_BOOL = 299               /* VALUE_BOOL  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif

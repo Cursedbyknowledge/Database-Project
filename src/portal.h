@@ -23,8 +23,6 @@ See the Mulan PSL v2 for more details. */
 #include "execution/executor_insert.h"
 #include "execution/executor_delete.h"
 #include "execution/execution_sort.h"
-#include "execution/executor_aggregation.h"
-#include "execution/executor_union.h"
 #include "common/common.h"
 
 typedef enum portalTag{
@@ -170,57 +168,13 @@ class Portal
         } else if(auto x = std::dynamic_pointer_cast<JoinPlan>(plan)) {
             std::unique_ptr<AbstractExecutor> left = convert_plan_executor(x->left_, context);
             std::unique_ptr<AbstractExecutor> right = convert_plan_executor(x->right_, context);
-            
-            // Detect INLJ: right is index scan on join column
-            RmFileHandle *right_fh = nullptr;
-            IxIndexHandle *right_ih = nullptr;
-            int join_key_offset = -1;
-            ColType join_key_type = TYPE_INT;
-            int join_key_len = 0;
-            
-            if (auto idx_scan = dynamic_cast<IndexScanExecutor*>(right.get())) {
-                right_fh = idx_scan->get_fh();
-                right_ih = idx_scan->get_ih();
-                // Find join key offset in left record
-                if (!x->conds_.empty()) {
-                    auto &cond = x->conds_[0];
-                    auto &left_cols = left->cols();
-                    auto lpos = std::find_if(left_cols.begin(), left_cols.end(), [&](const ColMeta &c) {
-                        return c.tab_name == cond.lhs_col.tab_name && c.name == cond.lhs_col.col_name;
-                    });
-                    if (lpos != left_cols.end()) {
-                        join_key_offset = lpos->offset;
-                        join_key_type = lpos->type;
-                        join_key_len = lpos->len;
-                    }
-                }
-            }
-            
             std::unique_ptr<AbstractExecutor> join = std::make_unique<NestedLoopJoinExecutor>(
                                 std::move(left), 
-                                std::move(right), std::move(x->conds_),
-                                right_fh, right_ih, join_key_offset, join_key_type, join_key_len);
+                                std::move(right), std::move(x->conds_));
             return join;
         } else if(auto x = std::dynamic_pointer_cast<SortPlan>(plan)) {
             return std::make_unique<SortExecutor>(convert_plan_executor(x->subplan_, context), 
                                             x->sel_col_, x->is_desc_);
-        } else if(auto x = std::dynamic_pointer_cast<AggregationPlan>(plan)) {
-            auto prev = convert_plan_executor(x->subplan_, context);
-            // Build aggregation column info from child columns
-            std::vector<AggregationExecutor::AggColInfo> agg_cols;
-            auto &prev_cols = prev->cols();
-            for (size_t i = 0; i < prev_cols.size(); i++) {
-                AggregationExecutor::AggColInfo info;
-                info.src_idx = i;
-                info.func = AGG_COUNT_ALL;
-                info.is_count_star = true;
-                agg_cols.push_back(info);
-            }
-            return std::make_unique<AggregationExecutor>(std::move(prev), x->group_by_cols_, agg_cols);
-        } else if(auto x = std::dynamic_pointer_cast<UnionPlan>(plan)) {
-            return std::make_unique<UnionExecutor>(convert_plan_executor(x->left_, context),
-                                                   convert_plan_executor(x->right_, context),
-                                                   x->is_all_);
         }
         return nullptr;
     }
