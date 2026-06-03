@@ -230,25 +230,35 @@ page_id_t IxIndexHandle::insert_entry(const char *key, const Rid &value, Transac
     }
 
     auto [leaf, root_latched] = find_leaf_page(key, Operation::INSERT, transaction, false);
-
-    int old_size = leaf->get_size();
-    leaf->insert(key, value);
     int leaf_page_no = leaf->get_page_no();
 
-    if (leaf->get_size() == old_size) {
-        buffer_pool_manager_->unpin_page(leaf->get_page_id(), false);
-        delete leaf;
-        return leaf_page_no;
-    }
-
-    maintain_parent(leaf);
-
+    // 先分裂再插入，防止insert_pairs中key数组越界覆盖rids
     if (leaf->get_size() >= leaf->get_max_size()) {
         IxNodeHandle *new_leaf = split(leaf);
         const char *new_key = new_leaf->get_key(0);
         insert_into_parent(leaf, new_key, new_leaf, transaction);
+        
+        // 分裂后判断新key落入哪一侧
+        if (ix_compare(key, new_leaf->get_key(0), file_hdr_->col_types_, file_hdr_->col_lens_) < 0) {
+            leaf->insert(key, value);
+        } else {
+            new_leaf->insert(key, value);
+        }
+        
+        maintain_parent(leaf);
+        maintain_parent(new_leaf);
         buffer_pool_manager_->unpin_page(new_leaf->get_page_id(), true);
         delete new_leaf;
+    } else {
+        leaf->insert(key, value);
+        int new_size = leaf->get_size();
+        if (new_size == leaf->get_size() - 1) {
+            // duplicate key, no change
+            buffer_pool_manager_->unpin_page(leaf->get_page_id(), false);
+            delete leaf;
+            return leaf_page_no;
+        }
+        maintain_parent(leaf);
     }
 
     buffer_pool_manager_->unpin_page(leaf->get_page_id(), true);
@@ -329,6 +339,7 @@ bool IxIndexHandle::adjust_root(IxNodeHandle *old_root_node) {
         update_root_page_no(child_page);
         buffer_pool_manager_->unpin_page(child->get_page_id(), true);
         delete child;
+        release_node_handle(*old_root_node);
         return true;
     }
     return false;
