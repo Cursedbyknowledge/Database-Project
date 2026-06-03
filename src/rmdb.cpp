@@ -139,6 +139,23 @@ void *client_handler(void *sock_fd) {
                 data_send[e.get_msg_len() + 1] = '\0';
                 offset = e.get_msg_len() + 1;
             }
+        } else if (strncmp(data_recv, "create static_checkpoint", 24) == 0) {
+            pthread_mutex_unlock(buffer_mutex);
+            // 1. Flush log buffer to disk
+            context->log_mgr_->flush_log_to_disk();
+            // 2. Write checkpoint restart record (log file size = checkpoint offset)
+            std::ifstream log_in(LOG_FILE_NAME, std::ios::binary | std::ios::ate);
+            if (log_in.is_open()) {
+                int log_offset = static_cast<int>(log_in.tellg());
+                log_in.close();
+                std::ofstream restart_file("restart.txt");
+                restart_file << log_offset;
+                restart_file.close();
+            }
+            // 3. Flush all dirty pages
+            for (auto &entry : sm_manager->fhs_) {
+                sm_manager->get_bpm()->flush_all_pages(entry.second->GetFd());
+            }
         } else {
             YY_BUFFER_STATE buf = yy_scan_string(data_recv);
             if (yyparse() == 0) {

@@ -11,19 +11,30 @@ See the Mulan PSL v2 for more details. */
 #include "log_recovery.h"
 #include <unordered_set>
 #include <algorithm>
+#include <fstream>
+
+// Helper: get checkpoint offset from restart file
+static int get_checkpoint_offset() {
+    std::ifstream restart_file("restart.txt");
+    if (restart_file.is_open()) {
+        int offset = 0;
+        restart_file >> offset;
+        restart_file.close();
+        return offset;
+    }
+    return 0;  // No checkpoint, start from beginning
+}
 
 /**
- * @description: analyze阶段 - 扫描日志识别活跃事务和脏页
- * 从最新的静态检查点开始扫描，构建 undo_list (未完成事务) 和 redo_list (需要重做的事务)
+ * @description: analyze阶段 - 从静态检查点开始扫描，识别活跃/已提交事务
  */
 void RecoveryManager::analyze() {
-    // 简化实现：扫描所有日志，识别 BEGIN 和 COMMIT/ABORT
-    // 处于活跃状态的事务（有 BEGIN 但无 COMMIT/ABORT）需要 undo
     active_txns_.clear();
     committed_txns_.clear();
     
-    // Read log file from beginning (or from last checkpoint)
-    int log_offset = 0;
+    // 从重启文件中读取检查点位置，实现 <70% 恢复时间
+    int log_offset = get_checkpoint_offset();
+    
     char log_buf[LOG_BUFFER_SIZE];
     int bytes_read = disk_manager_->read_log(log_buf, LOG_BUFFER_SIZE, log_offset);
     
@@ -34,7 +45,7 @@ void RecoveryManager::analyze() {
             int log_tot_len = *reinterpret_cast<uint32_t*>(log_buf + offset + OFFSET_LOG_TOT_LEN);
             txn_id_t log_tid = *reinterpret_cast<txn_id_t*>(log_buf + offset + OFFSET_LOG_TID);
             
-            if (log_tot_len <= 0) break;  // corrupted or end
+            if (log_tot_len <= 0) break;
             
             switch (log_type) {
                 case LogType::begin:
@@ -61,11 +72,13 @@ void RecoveryManager::analyze() {
 }
 
 /**
- * @description: redo阶段 - 重做已提交事务的所有操作
- * 从日志起始位置扫描，重做所有 INSERT/DELETE/UPDATE 操作
+ * @description: redo阶段 - 必须重演历史 (Repeating History)
+ * ARIES铁律：不管事务最终 Commit 还是 Abort，只要是落盘的日志，全部无脑 Redo！
+ * 原因：RMDB使用STEAL策略，未提交事务的脏页可能已被刷盘。
+ * 如果不重做所有操作，undo阶段的补偿操作会在错误的数据状态上执行，导致崩溃。
  */
 void RecoveryManager::redo() {
-    int log_offset = 0;
+    int log_offset = get_checkpoint_offset();
     char log_buf[LOG_BUFFER_SIZE];
     int bytes_read = disk_manager_->read_log(log_buf, LOG_BUFFER_SIZE, log_offset);
     
@@ -74,44 +87,40 @@ void RecoveryManager::redo() {
         while (offset < bytes_read) {
             LogType log_type = *reinterpret_cast<LogType*>(log_buf + offset);
             int log_tot_len = *reinterpret_cast<uint32_t*>(log_buf + offset + OFFSET_LOG_TOT_LEN);
-            txn_id_t log_tid = *reinterpret_cast<txn_id_t*>(log_buf + offset + OFFSET_LOG_TID);
             
             if (log_tot_len <= 0) break;
             
-            // 只重做已提交事务的操作
-            if (committed_txns_.count(log_tid)) {
-                switch (log_type) {
-                    case LogType::INSERT: {
-                        InsertLogRecord rec;
-                        rec.deserialize(log_buf + offset);
-                        // Re-insert the record at the logged position
-                        if (sm_manager_->fhs_.count(std::string(rec.table_name_))) {
-                            auto fh = sm_manager_->fhs_[std::string(rec.table_name_)].get();
-                            fh->insert_record(rec.rid_, rec.insert_value_.data);
-                        }
-                        break;
+            // 全部 Redo，不区分是否已提交！这是 Repeating History 原则
+            switch (log_type) {
+                case LogType::INSERT: {
+                    InsertLogRecord rec;
+                    rec.deserialize(log_buf + offset);
+                    if (sm_manager_->fhs_.count(std::string(rec.table_name_))) {
+                        auto fh = sm_manager_->fhs_[std::string(rec.table_name_)].get();
+                        fh->insert_record(rec.rid_, rec.insert_value_.data);
                     }
-                    case LogType::DELETE: {
-                        DeleteLogRecord rec;
-                        rec.deserialize(log_buf + offset);
-                        if (sm_manager_->fhs_.count(std::string(rec.table_name_))) {
-                            auto fh = sm_manager_->fhs_[std::string(rec.table_name_)].get();
-                            fh->delete_record(rec.rid_, nullptr);
-                        }
-                        break;
-                    }
-                    case LogType::UPDATE: {
-                        UpdateLogRecord rec;
-                        rec.deserialize(log_buf + offset);
-                        if (sm_manager_->fhs_.count(std::string(rec.table_name_))) {
-                            auto fh = sm_manager_->fhs_[std::string(rec.table_name_)].get();
-                            fh->update_record(rec.rid_, rec.new_value_.data, nullptr);
-                        }
-                        break;
-                    }
-                    default:
-                        break;
+                    break;
                 }
+                case LogType::DELETE: {
+                    DeleteLogRecord rec;
+                    rec.deserialize(log_buf + offset);
+                    if (sm_manager_->fhs_.count(std::string(rec.table_name_))) {
+                        auto fh = sm_manager_->fhs_[std::string(rec.table_name_)].get();
+                        fh->delete_record(rec.rid_, nullptr);
+                    }
+                    break;
+                }
+                case LogType::UPDATE: {
+                    UpdateLogRecord rec;
+                    rec.deserialize(log_buf + offset);
+                    if (sm_manager_->fhs_.count(std::string(rec.table_name_))) {
+                        auto fh = sm_manager_->fhs_[std::string(rec.table_name_)].get();
+                        fh->update_record(rec.rid_, rec.new_value_.data, nullptr);
+                    }
+                    break;
+                }
+                default:
+                    break;
             }
             
             offset += log_tot_len;
@@ -125,40 +134,15 @@ void RecoveryManager::redo() {
 
 /**
  * @description: undo阶段 - 回滚未完成的事务
- * 对 active_txns_ 中的每个事务，反向遍历其日志并执行补偿操作
  */
 void RecoveryManager::undo() {
     if (active_txns_.empty()) return;
     
-    // 反向扫描日志，对活跃事务执行补偿操作
-    int file_size = disk_manager_->get_file_size(LOG_FILE_NAME);
-    int log_offset = std::max(0, file_size - LOG_BUFFER_SIZE);
-    char log_buf[LOG_BUFFER_SIZE];
-    
-    while (log_offset >= 0) {
-        int bytes_read = disk_manager_->read_log(log_buf, LOG_BUFFER_SIZE, log_offset);
-        if (bytes_read <= 0) { log_offset -= LOG_BUFFER_SIZE; continue; }
-        
-        int offset = bytes_read;
-        while (offset > 0) {
-            // 从后向前查找日志边界（简化：从每条记录的 tot_len 定位）
-            // 实际上需要从文件起始正序读取并记录每条日志的位置和类型
-            // 这里采用简化实现：正序读取一次，记录所有需要 undo 的日志位置
-            offset--;
-        }
-        
-        log_offset -= LOG_BUFFER_SIZE;
-    }
-    
-    // 简化实现：正序扫描，为活跃事务收集undo信息
-    // 实际上应对每个活跃事务，从后往前遍历其日志链并执行补偿
-    // 由于UndoLog链由prev_lsn_连接，这里执行基本回滚
-    
+    // 正序扫描收集活跃事务的操作日志
     int log_pos = 0;
     char scan_buf[LOG_BUFFER_SIZE];
     int scan_bytes = disk_manager_->read_log(scan_buf, LOG_BUFFER_SIZE, log_pos);
     
-    // 为每个活跃事务收集操作（按LSN排序，后续反向处理）
     std::unordered_map<txn_id_t, std::vector<std::pair<char*, int>>> txn_ops;
     
     while (scan_bytes > 0) {
