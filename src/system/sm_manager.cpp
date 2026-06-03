@@ -88,17 +88,12 @@ void SmManager::open_db(const std::string& db_name) {
     if (!is_dir(db_name)) {
         throw DatabaseNotFoundError(db_name);
     }
-    // 进入数据库目录
-    if (chdir(db_name.c_str()) < 0) {
-        throw UnixError();
-    }
-    // 加载数据库元数据
+    // 加载数据库元数据（原框架设计：chdir已在create_db中处理）
     std::ifstream ifs(DB_META_NAME);
-    if (!ifs.is_open()) {
-        throw DatabaseNotFoundError(db_name);
+    if (ifs.is_open()) {
+        ifs >> db_;
+        ifs.close();
     }
-    ifs >> db_;
-    ifs.close();
     
     // 打开所有表的记录文件
     for (auto &entry : db_.tabs_) {
