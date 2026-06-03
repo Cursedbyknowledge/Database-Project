@@ -170,9 +170,36 @@ class Portal
         } else if(auto x = std::dynamic_pointer_cast<JoinPlan>(plan)) {
             std::unique_ptr<AbstractExecutor> left = convert_plan_executor(x->left_, context);
             std::unique_ptr<AbstractExecutor> right = convert_plan_executor(x->right_, context);
+            
+            // Detect INLJ: right is index scan on join column
+            RmFileHandle *right_fh = nullptr;
+            IxIndexHandle *right_ih = nullptr;
+            int join_key_offset = -1;
+            ColType join_key_type = TYPE_INT;
+            int join_key_len = 0;
+            
+            if (auto idx_scan = dynamic_cast<IndexScanExecutor*>(right.get())) {
+                right_fh = idx_scan->get_fh();
+                right_ih = idx_scan->get_ih();
+                // Find join key offset in left record
+                if (!x->conds_.empty()) {
+                    auto &cond = x->conds_[0];
+                    auto &left_cols = left->cols();
+                    auto lpos = std::find_if(left_cols.begin(), left_cols.end(), [&](const ColMeta &c) {
+                        return c.tab_name == cond.lhs_col.tab_name && c.name == cond.lhs_col.col_name;
+                    });
+                    if (lpos != left_cols.end()) {
+                        join_key_offset = lpos->offset;
+                        join_key_type = lpos->type;
+                        join_key_len = lpos->len;
+                    }
+                }
+            }
+            
             std::unique_ptr<AbstractExecutor> join = std::make_unique<NestedLoopJoinExecutor>(
                                 std::move(left), 
-                                std::move(right), std::move(x->conds_));
+                                std::move(right), std::move(x->conds_),
+                                right_fh, right_ih, join_key_offset, join_key_type, join_key_len);
             return join;
         } else if(auto x = std::dynamic_pointer_cast<SortPlan>(plan)) {
             return std::make_unique<SortExecutor>(convert_plan_executor(x->subplan_, context), 

@@ -168,4 +168,10 @@ class IndexScanExecutor : public AbstractExecutor {
         return *pos;
     }
     Rid &rid() override { return rid_; }
+    // INLJ support: expose index handle and file handle
+    RmFileHandle* get_fh() { return fh_; }
+    IxIndexHandle* get_ih() { 
+        auto ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index_col_names_);
+        return sm_manager_->ihs_.at(ix_name).get();
+    }
 };
