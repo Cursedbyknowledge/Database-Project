@@ -1,0 +1,997 @@
+[P0] 完成赛题后推送地址：https://gitlab.eduxiji.net/T2026110629910427/rmdb-lmsycbk-project.git
+[P1] 1. 2026题目一：存储管理
+[P2] 题目种类：内核代码填充
+[P3] 推荐知识点：存储管理的基本原理、文件存储组织、记录存储组织、缓冲区管理
+[P4] 代码框架：https://gitlab.eduxiji.net/csc1/csc-db/db2026/-/tree/main/rmdb
+[P6] 题目描述：
+[P7] 在大赛提供的代码框架的基础上，提供相关接口的实现，完成指定功能。本题目包含若干子任务，每个任务对应不同的测试点，只有通过相应测试点才可以获得相应的分数。
+[P8] 提示：
+[P9] l 测试代码会调用指定接口来进行测试，参赛队伍不能修改已有的接口，也不能删除已有的数据结构及数据结构中的变量，但是可以增添新的接口、数据结构、变量。
+[P10] l 大赛提供了项目结构文档来帮助参赛队伍理解代码框架，同时在代码注释中，也对数据结构及接口进行了说明，参赛队伍可以通过阅读代码注释来辅助理解代码框架。
+[P11] 1、磁盘管理器
+[P12] 在本任务中，参赛队伍需要实现磁盘管理器DiskManager的相关接口，磁盘管理器负责文件操作、读写页面等。在完成本任务之前，参赛队伍需要阅读项目结构文档中磁盘管理器的相关说明，以及代码框架中src/errors.h、src/storage/disk_manager.h、src/storage/disk_manager.cpp、src/common/config.h文件。
+[P13] 参赛队伍需要实现以下接口：
+[P14] （1）void DiskManager::create_file(const std::string &path);
+[P15] 该接口的参数path为文件名，该接口的功能是创建文件，其文件名为path参数指定的文件名。
+[P16] （2）void DiskManager::open_file(const std::string &path);
+[P17] 该接口的参数path为文件名，该接口的功能是打开文件名参数path指定的文件。
+[P18] （3）void DiskManager::close_file(const std::string &path);
+[P19] 该接口的参数path为文件名，该接口的功能是关闭文件名参数path指定的文件。
+[P20] （4）void DiskManager::destroy_file(const std::string &path);
+[P21] 该接口的参数path为文件名，该接口的功能是删除文件名参数path指定的文件。
+[P22] （5）void DiskManager::write_page(int fd, page_id_t page_no, const char *offset, int num_bytes);
+[P23] 该接口负责在文件的指定页面写入指定长度的数据，该接口从指定页面的起始位置开始写入数据。
+[P24] （6）void DiskManager::read_page(int fd, page_id_t page_no, char *offset, int num_bytes);
+[P25] 该接口需要从文件的指定页面读取指定长度的数据，该接口从指定页面的起始位置开始读取数据。
+[P27] 2、缓冲池管理器
+[P28] 在本任务中，参赛队伍需要实现缓冲池管理器BufferPoolManager和缓冲池替换策略Replacer相关的接口，缓冲池管理器负责管理缓冲池中的页面在内外存的交换，缓冲池替换策略主要负责缓冲区页面的淘汰和查找。在完成本任务之前，参赛队伍需要首先阅读项目结构文档中缓冲池管理器的相关说明，以及代码框架中src/storage和src/replacer文件夹下的代码文件。
+[P30] 对于缓冲池替换策略Replacer，参赛队伍需要实现一个Replacer的子类LRUReplacer，LRUReplacer实现了缓冲池页面替换的LRU策略，需要实现的接口如下：
+[P31] (1) bool LRUReplacer::victim(frame_id_t* frame_id);
+[P32] 该接口的功能是选择并淘汰缓冲池中一个页面。如果成功找到要淘汰的页面，则函数返回值为true；否则，返回值为false。被淘汰的页面所在的帧由参数frame_id返回。
+[P33] (2) void LRUReplacer::pin(frame_id_t frame_id);
+[P34] 该接口的功能是固定住一个帧中的页面，代表该页面正在使用，不可被换出，参数frame_id指定了帧的编号。
+[P35] (3) void LRUReplacer::unpin(frame_id_t frame_id);
+[P36] 该接口的功能是取消固定一个帧中的页面，当该页面使用完毕时调用unpin函数取消对该页面的固定，参数frame_id指定了帧的编号。
+[P37] 对于缓冲池管理器BufferPoolManager，参赛队伍需要管理缓冲池中的页面，并对缓冲池进行并发控制，需要实现的接口如下：
+[P38] (1) Page *BufferPoolManager::new_page(PageId *page_id);
+[P39] 该成员函数用于在缓冲池中申请创建一个新页面。如果创建新页面成功，则返回指向该页面的指针，同时通过参数page_id返回新建页面的编号。
+[P40] (2) Page *BufferPoolManager::fetch_page(PageId page_id);
+[P41] 该成员函数用于获取缓冲池中的指定页面。待获取页面的编号由参数page_id给出。
+[P42] (3) bool BufferPoolManager::find_victim_page(frame_id_t *frame_id);
+[P43] 当缓冲池中没有可用的空闲帧时，该成员函数用于寻找需要淘汰的页面。如果成功找到要淘汰的页面，则函数返回值为true；否则，返回值为false。被淘汰的页面所在的帧由参数frame_id返回。在实现这个成员函数时，需要调用LRUReplacer::victim函数。
+[P44] (4) void BufferPoolManager::update_page(Page *page, PageId new_page_id, frame_id_t new_frame_id);
+[P45] 当缓冲池想要把某个帧中的页面置换为新页面或者删除该帧中的页面时，会调用update_page函数，该函数把指定帧中的原有页面刷入磁盘中，并将新页面和该帧建立映射，即更新页表。
+[P46] (5) bool BufferPoolManager::unpin_page(PageId page_id, bool is_dirty);
+[P47] 当某个操作完成某个页面的使用之后，需要调用该函数将取消该操作对该页面的固定。当所有操作都完成该页面的使用之后，需要在Replacer中调用Unpin函数取消该页面的固定。
+[P48] (6) bool BufferPoolManager::delete_page(PageId page_id);
+[P49] 用于在缓冲池中删除指定页面，同时将该页面所在的帧置为空闲帧。如果当前页面正在被某个操作使用，则该页面不能被删除。
+[P50] (7) bool BufferPoolManager::flush_page(PageId page_id);
+[P51] 用于强制刷新缓冲池中的指定页面到磁盘上，无论该页是否正在被使用，或者是否为脏页，都需要把该页面的数据刷入磁盘中。
+[P52] (8) void BufferPoolManager::flush_all_pages(int fd);
+[P53] 用于将指定文件中的存在于缓冲池的所有页面都刷新到磁盘。
+[P54] 提示：在缓冲池中，需要淘汰某个脏页时，需要将脏页写入磁盘。
+[P56] 3、记录管理器
+[P57] 在本任务中，参赛队伍需要填充记录管理器涉及的RmFileHandle类和RmScan类，RmFileHandle类负责对表的记录进行操作，RmScan类用于遍历表文件中存放的记录。
+[P58] 对于RmFileHandle类。在完成本文任务之前，参赛队伍需要阅读项目结构文档中记录管理器的相关说明，以及代码框架中src/record文件夹下的代码文件。
+[P59] 参赛队伍需要实现的接口如下：
+[P60] (1) std::unique_ptr<RmRecord> RmFileHandle::get_record(const Rid &rid, Context *context) const;
+[P61] 该函数用于获取表中某一条指定位置的记录，每条记录由Rid来进行唯一标识。
+[P62] (2) Rid RmFileHandle::insert_record(char *buf, Context *context);
+[P63] 该函数负责向表中插入一条新记录，在该函数中未指定记录的插入位置，参赛队伍需要选择一个空闲位置插入记录并同步更新表的元数据信息。
+[P64] (3) void RmFileHandle::insert_record(const Rid &rid, char *buf);
+[P65] 该函数负责向表中的指定位置插入一条记录，该函数主要用于事务的回滚和系统故障恢复。
+[P66] (4) void RmFileHandle::delete_record(const Rid &rid, Context *context);
+[P67] 该函数负责删除表中指定位置的记录。
+[P68] (5) void RmFileHandle::update_record(const Rid &rid, char *buf, Context *context);
+[P69] 该函数负责把表中指定位置的记录更新为新的值。
+[P70] 对于RmScan类，参赛队伍需要实现的接口如下：
+[P71] (1) RmScan(const RmFileHandle *file_handle);
+[P72] 该函数为RmScan类的构造函数，需要初始化相关成员变量。
+[P73] (2) void RmScan::next() override;
+[P74] 该函数负责找到表文件中下一个存放了合法记录的位置。
+[P75] (3) bool RmScan::is_end() const override;
+[P76] 该函数负责判断是否已经扫描到文件的末尾位置。
+[P78] 测试示例：
+[P79] unit_test.cpp中提供了参考测试示例，最终测试包括但不限于unit_test.cpp中提供的测试。
+[P80] 2. 2026题目二：查询执行
+[P81] 前置题目：存储管理
+[P82] 题目种类：基础功能
+[P83] 推荐知识点：逻辑查询优化、查询解析、基本算子实现、查询执行框架、元数据存储组织
+[P84] 代码框架：https://gitlab.eduxiji.net/csc1/csc-db/db2026/-/tree/main/rmdb
+[P86] 题目描述：
+[P87] 在实现题目一功能的基础上增加查询执行模块，使得系统支持通过测试需要的元数据管理、DDL语句、DQL语句、DML语句。
+[P88] 提示：
+[P89] l 本题目提供了空缺的样例代码，参赛队伍可以选择进行补全，也可以选择自行构建。如果选择补全空缺的样例代码，需要实现“元数据管理与DDL语句”和“DQL语句和DML语句”。
+[P90] l 本题目通过sql进行测试，分为五个测试点，它们依次是“尝试建表”、“单表插入与条件查询”、“单表更新与条件查询”、“单表删除与条件查询”、“连接查询”。
+[P92] 1、元数据管理与DDL语句
+[P93] 本任务要求参赛队伍对数据库的元数据进行管理，并实现基本的DDL语句，包括create table和drop table两种语句。大赛提供的框架中，与元数据管理和DDL语句相关的代码文件位于src/system文件夹下，代码框架中提供了create table语句的实现方式。
+[P95] 2、DQL语句和DML语句
+[P96] DML语句要求实现基本的增删改，即insert、delete、update语句。DQL语句要求实现select语句。在完成本任务之前，参赛队伍需要首先阅读项目结构文档中查询解析、查询优化、查询执行的相关说明，以及代码框架中src/analyze、src/optimizer、src/execution文件夹下的代码文件，参赛队伍需要实现代码框架中未提供的功能，包括语义检查、查询执行计划的生成、执行算子等。
+[P98] 本题目通过SQL来进行测试，因此参赛队伍可以对代码进行重构。
+[P100] 测试示例：
+[P101] 测试点1: 尝试建表
+[P102] 测试示例：
+[P103] create table t1(id int,name char(4));
+[P104] show tables;
+[P105] create table t2(id int);
+[P106] show tables;
+[P107] drop table t1;
+[P108] show tables;
+[P109] drop table t2;
+[P110] show tables;
+[P111] 期待输出：
+[P112] | Tables |
+[P113] | t1 |
+[P114] | Tables |
+[P115] | t1 |
+[P116] | t2 |
+[P117] | Tables |
+[P118] | t2 |
+[P119] | Tables |
+[P121] 测试点2: 单表插入与条件查询
+[P122] 测试示例：
+[P123] create table grade (name char(20),id int,score float);
+[P124] insert into grade values ('Data Structure', 1, 90.5);
+[P125] insert into grade values ('Data Structure', 2, 95.0);
+[P126] insert into grade values ('Calculus', 2, 92.0);
+[P127] insert into grade values ('Calculus', 1, 88.5);
+[P128] select * from grade;
+[P129] select score,name,id from grade where score > 90;
+[P130] select id from grade where name = 'Data Structure';
+[P131] select name from grade where id = 2 and score > 90;  
+[P132] 期待输出：
+[P133] | name | id | score |
+[P134] | Data Structure | 1 | 90.500000 |
+[P135] | Data Structure | 2 | 95.000000 |
+[P136] | Calculus | 2 | 92.000000 |
+[P137] | Calculus | 1 | 88.500000 |
+[P138] | score | name | id |
+[P139] | 90.500000 | Data Structure | 1 |
+[P140] | 95.000000 | Data Structure | 2 |
+[P141] | 92.000000 | Calculus | 2 |
+[P142] | id |
+[P143] | 1 |
+[P144] | 2 |
+[P145] | name |
+[P146] | Data Structure |
+[P147] | Calculus |
+[P149] 测试点3：单表更新与条件查询
+[P150] 测试示例：
+[P151] create table grade (name char(20),id int,score float);
+[P152] insert into grade values ('Data Structure', 1, 90.5);
+[P153] insert into grade values ('Data Structure', 2, 95.0);
+[P154] insert into grade values ('Calculus', 2, 92.0);
+[P155] insert into grade values ('Calculus', 1, 88.5);
+[P156] select * from grade;
+[P157] update grade set score =  90 where name = 'Calculus' ;
+[P158] select * from grade;
+[P159] update grade set name = 'Error name' where name > 'A';
+[P160] select * from grade;
+[P161] update grade set name = 'Error' ,id = -1,score = 0 where name = 'Error name' and score >= 90;
+[P162] select * from grade;
+[P163] 期待输出：
+[P164] | name | id | score |
+[P165] | Data Structure | 1 | 90.500000 |
+[P166] | Data Structure | 2 | 95.000000 |
+[P167] | Calculus | 2 | 92.000000 |
+[P168] | Calculus | 1 | 88.500000 |
+[P169] | name | id | score |
+[P170] | Data Structure | 1 | 90.500000 |
+[P171] | Data Structure | 2 | 95.000000 |
+[P172] | Calculus | 2 | 90.000000 |
+[P173] | Calculus | 1 | 90.000000 |
+[P174] | name | id | score |
+[P175] | Error name | 1 | 90.500000 |
+[P176] | Error name | 2 | 95.000000 |
+[P177] | Error name | 2 | 90.000000 |
+[P178] | Error name | 1 | 90.000000 |
+[P179] | name | id | score |
+[P180] | Error | -1 | 0.000000 |
+[P181] | Error | -1 | 0.000000 |
+[P182] | Error | -1 | 0.000000 |
+[P183] | Error | -1 | 0.000000 |
+[P185] 测试点4：单表删除与条件查询
+[P186] 测试示例：
+[P187] create table grade (name char(20),id int,score float);
+[P188] insert into grade values ('Data Structure', 1, 90.5);
+[P189] select * from grade;
+[P190] delete from grade where score > 90;
+[P191] select * from grade;
+[P192] 期待输出：
+[P193] | name | id | score|
+[P194] | Data Structure | 1 | 90.500000 |
+[P195] | name | id | score|
+[P197] 测试点5：连接查询
+[P198] 测试示例：
+[P199] create table t ( id int , t_name char (3));
+[P200] create table d (d_name char(5),id int);
+[P201] insert into t values (1,'aaa');
+[P202] insert into t values (2,'baa');
+[P203] insert into t values (3,'bba');
+[P204] insert into d values ('12345',1);
+[P205] insert into d values ('23456',2);
+[P206] select * from t, d;
+[P207] select t.id,t_name,d_name from t,d where t.id = d.id;
+[P208] select t.id,t_name,d_name from t join d where t.id = d.id;
+[P209] 期待输出：
+[P210] | id | t_name | d_name | id |
+[P211] | 1 | aaa | 23456 | 2 |
+[P212] | 1 | aaa | 12345 | 1 |
+[P213] | 2 | baa | 23456 | 2 |
+[P214] | 2 | baa | 12345 | 1 |
+[P215] | 3 | bba | 23456 | 2 |
+[P216] | 3 | bba | 12345 | 1 |
+[P217] | id | t_name | d_name |
+[P218] | 1 | aaa | 12345 |
+[P219] | 2 | baa | 23456 |
+[P220] | id | t_name | d_name |
+[P221] | 1 | aaa | 12345 |
+[P222] | 2 | baa | 23456 |
+[P224] 测试输出要求：
+[P225] 本题目的输出要求写入数据库文件夹下的output.txt文件中，例如测试数据库名称为execution_test_db，则在测试时使用./bin/rmdb execution_test_db命令来启动服务端，对应输出应写入buid/execution_test_db/output.txt文件中。
+[P227] 3. 2026题目三：唯一索引
+[P228] 前置题目：查询执行
+[P229] 题目种类：基础功能
+[P230] 推荐知识点：B+树索引
+[P231] 代码框架：https://gitlab.eduxiji.net/csc1/csc-db/db2026/-/tree/main/rmdb
+[P233] 题目描述：
+[P234] 在现有系统的基础上增添索引功能，该索引为唯一索引，要求系统能够支持创建索引、删除索引、展示某个表上的索引、单点查询和范围查询，实现索引与基表的同步。
+[P235] 如果一个表上的某个字段建有唯一索引，则该表中任意两个记录中该字段的值不相同。
+[P237] 提示：
+[P238] （1）功能题目对代码框架没有限制，参赛队伍可以修改、增添、删除数据结构及接口，也可以对框架进行重构。
+[P239] （2）磁盘数据库中常用的索引为B+树索引，推荐使用B+树来实现索引功能，参赛队伍也可以使用其他类型的索引，但需要能够支持题目中要求的功能。
+[P240] （3）对于测试点2、3，即“索引的查询”和“维护索引的插入、删除、更新”，会进行单独的是否真正使用了索引的测试——对于数千条查询语句，建立索引后的执行时间应该小于建立索引前的执行时间的70%，才可以视为真正使用了索引的测试。
+[P241] （4）改题目不要求使用B+树作为索引，所以对于参赛队伍测试点2、3的输出结果不要求行的顺序与期待输出的行的顺序完全一致，但列的顺序要求完全一致。
+[P243] 1、创建、删除、展示索引
+[P244] （1）支持单个字段索引的创建和删除；
+[P245] （2）支持多个字段索引的创建和删除；
+[P246] （3）查看某个表上的索引信息；
+[P247] （4）show index from table_name的输出格式为 | table_name | unique | (column_name, column_name) |。参考下方测试用例和期待输出
+[P249] 测试示例：
+[P250] create table warehouse (id int, name char(8));
+[P251] create index warehouse (id);
+[P252] show index from warehouse;
+[P253] create index warehouse (id,name);
+[P254] show index from warehouse;
+[P255] drop index warehouse (id);
+[P256] drop index warehouse (id,name);
+[P257] show index from warehouse;
+[P258] 期望输出： 
+[P259] | warehouse | unique | (id) | // 第一个show index的输出
+[P260] | warehouse | unique | (id) | // 第二个show index的输出
+[P261] | warehouse | unique | (id,name) | // 第二个show index的输出
+[P262] // 第三个show index没有输出
+[P264] 2、索引查询
+[P265] 在创建索引后，能够使用索引进行单点查询和范围查询。
+[P267] 提示：
+[P268] 在大赛提供的框架中，只有查询条件与索引完全一致，并且是单点查询时，才使用索引来进行查询，你需要对索引匹配规则进行修改，要求使用最左匹配原则。例如，表A的(id, name, score)三个属性上有一个联合索引，对于以下几种查询，都需要使用索引来进行查询：
+[P269] l select * from A where id = 1 and name = 'abcd' and score = 99.0;
+[P270] l select * from A where id = 1 and name = 'abcd' and score > 90.0;
+[P271] l select * from A where id = 1 and name = 'abcd';
+[P272] l select * from A where name = 'abcd' and id = 1;  // 在进行查询计划生成时，应能够自动对顺序进行调整
+[P273] l select * from A where id = 1;
+[P274] l select * from A where id > 1;
+[P276] 测试示例：
+[P277] create table warehouse (w_id int, name char(8));
+[P278] insert into warehouse values (10 , 'qweruiop');
+[P279] insert into warehouse values (534, 'asdfhjkl');
+[P280] insert into warehouse values (100,'qwerghjk');
+[P281] insert into warehouse values (500,'bgtyhnmj');
+[P282] create index warehouse(w_id);
+[P283] select * from warehouse where w_id = 10;
+[P284] select * from warehouse where w_id < 534 and w_id > 100;
+[P285] drop index warehouse(w_id);
+[P286] create index warehouse(name);
+[P287] select * from warehouse where name = 'qweruiop';
+[P288] select * from warehouse where name > 'qwerghjk';
+[P289] select * from warehouse where name > 'aszdefgh' and name < 'qweraaaa';
+[P290] drop index warehouse(name);
+[P291] create index warehouse(w_id,name);
+[P292] select * from warehouse where w_id = 100 and name = 'qwerghjk';
+[P293] select * from warehouse where w_id < 600 and name > 'bztyhnmj';
+[P294] 期待输出：
+[P295] | w_id | name |
+[P296] | 10 | qweruiop |
+[P297] | w_id | name |
+[P298] | 500 | bgtyhnmj |
+[P299] | w_id | name |
+[P300] | 10 | qweruiop |
+[P301] | w_id | name |
+[P302] | 10 | qweruiop |
+[P303] | w_id | name |
+[P304] | 500 | bgtyhnmj |
+[P305] | w_id | name |
+[P306] | 100 | qwerghjk |
+[P307] | w_id | name |
+[P308] | 10 | qweruiop |
+[P309] | 100 | qwerghjk |
+[P312] 3、索引维护
+[P313] 在建有索引的表中插入、删除、更新数据时，能够根据表数据的变化同步对表上对索引进行更新，保证索引的正确性。同时，在索引被更新时，需要检查唯一性约束。
+[P315] 测试示例：
+[P316] create table warehouse (w_id int, name char(8));
+[P317] insert into warehouse values (10 , 'qweruiop');
+[P318] insert into warehouse values (534, 'asdfhjkl');
+[P319] select * from warehouse where w_id = 10;
+[P320] select * from warehouse where w_id < 534 and w_id > 100;
+[P321] create index warehouse(w_id);
+[P322] insert into warehouse values (500, 'lastdanc');
+[P323] update warehouse set w_id = 507 where w_id = 534;
+[P324] select * from warehouse where w_id = 10;
+[P325] select * from warehouse where w_id < 534 and w_id > 100;
+[P326] 期待输出：
+[P327] | w_id | name |
+[P328] | 10 | qweruiop |
+[P329] | w_id | name |
+[P330] | w_id | name |
+[P331] | 10 | qweruiop |
+[P332] | w_id | name |
+[P333] | 500 | lastdanc |
+[P334] | 507 | asdfhjkl |
+[P336] 测试输出要求：
+[P337] 本题目的输出要求写入数据库文件夹下的output.txt文件中，例如测试数据库名称为index_test_db，则在测试时使用./bin/rmdb index_test_db命令来启动服务端，对应输出应写入buid/index_test_db/output.txt文件中。
+[P339] 4. 2026题目四：查询优化与执行
+[P340] 前置题目：查询执行
+[P341] 题目种类：基础功能
+[P342] 大赛框架：https://gitlab.eduxiji.net/csc1/csc-db/db2026/-/tree/main/rmdb
+[P343] 1. 题目描述
+[P344] 查询优化是数据库系统中的重要组成部分，其目标是在保证查询结果正确性的前提下，通过改写 SQL 语句或调整执行计划，减少中间数据量、降低计算开销，从而提高查询执行效率。本题要求实现一个简化版的查询优化器，能够生成规范的查询计划树，并在执行后输出计划节点的运行时统计信息。
+[P345] 具体来说，我们要求实现以下两种优化：
+[P347] 基于规则的选择运算下推（谓词下推）。选择运算下推要求在查询计划树中，利用选择运算与投影运算，以及选择运算与笛卡尔积的交换律等，通过交换节点在树中的位置，尽可能将选择运算对应的节点放到查询计划树的底层。其目的是：尽可能早地过滤掉与后续操作无关的行，避免中间结果生成后再进行过滤所带来的额外开销。选择运算下推有助于减少中间数据中不必要的行，降低中间数据的传递和处理量，从而提高查询效率。
+[P350] 基于规则的投影运算下推。同上，投影运算下推要求在查询计划树中，利用投影运算与笛卡尔积的分配率，以及投影的串接定律等，通过交换节点在树中的位置，尽可能地先执行查询中的投影操作。其目的是：尽可能早地去除与后续操作无关的列，避免中间结果生成后再进行投影所带来的额外开销。投影运算下推有助于减少中间数据中不必要的列，可以显著降低数据传输和处理的开销。
+[P352] 本题要求在现有 SQL 查询语句的基础上，增加对 EXPLAIN ANALYZE 关键字的支持。EXPLAIN ANALYZE 的输入形式为 EXPLAIN ANALYZE + SQL查询语句，系统需要先生成优化后的查询计划，再执行该计划并统计每个计划节点的运行时行数。EXPLAIN ANALYZE 只输出优化后的查询计划树与运行时统计信息，不输出该查询本身的结果集。
+[P353] 每个计划节点的 rows=N 表示该节点本次执行时涉及的总行数。Scan 节点的 rows 表示本次执行中扫描到的总行数；Filter 节点的 rows 表示过滤后输出的总行数；Project 节点的 rows 表示投影后输出的总行数；Join 节点的 rows 表示连接后输出的总行数。在 NLJ 中右侧子树作为内表会被左侧输入重复执行，因此右侧子树的 rows 可以累计到 左侧输入行数 × 右侧单次执行行数。
+[P354] 本题目共需实现四种查询计划节点：
+[P356] Scan：表扫描节点；
+[P359] Filter：过滤节点（对应选择运算）；
+[P362] Project：投影节点；
+[P365] Join：连接节点。
+[P367] 1.1 具体算子规范
+[P368] 计划树输出时，根节点行首不缩进，每深入一层在行首增加一个制表符 \t，同一层级节点使用相同数量的 \t 缩进，不使用空格代替制表符。Join 节点的两个子树按照实际执行顺序输出，左侧子树表示外表或已经连接得到的中间结果，右侧子树表示内表。除此之外，同一层级下的多个节点，按照字典升序输出，即先按照 Filter Join Project Scan 的顺序输出。同类型的节点，Scan 节点和 Join 节点按照 table 升序输出，Filter 按照条件的字典序升序输出，Project 节点按照“表名.列名”升序输出。所有的列输出时均要先输出各自的表名，如果表有别名，则使用别名。Condition 的输出格式和原始的 SQL 语句保持一致。
+[P370] 2. 评分标准
+[P371] 测评会综合检查 EXPLAIN ANALYZE 输出的优化计划树结构和各节点 rows 运行时统计是否符合规范，测试场景包括但不限于以下类型：
+[P373] 3. 测评示例
+[P374] 3.1 单表查询示例
+[P375] 3.1.1 数据准备
+[P376] CREATE TABLE t (a int, b int);INSERT INTO t VALUES (1, 5);INSERT INTO t VALUES (2, 8);INSERT INTO t VALUES (3, 12);INSERT INTO t VALUES (4, 6);INSERT INTO t VALUES (5, 20);
+[P377] 3.1.2 执行查询
+[P378] 执行如下命令，先确认结果正确性，再观察优化后的执行计划：
+[P379] SELECT a, b FROM t WHERE a > 1 AND b < 10;EXPLAIN ANALYZE SELECT a, b FROM t WHERE a > 1 AND b < 10;
+[P380] SELECT 结果：
+[P381] | a | b || 2 | 8 || 4 | 6 |
+[P382] EXPLAIN ANALYZE 期望输出：
+[P383] Project(columns=[t.a, t.b], rows=2)    Filter(condition=[t.a>1, t.b<10], rows=2)        Scan(table=t, type=SeqScan, rows=5)
+[P384] 说明：
+[P386] Scan rows=5：扫描 t 表全部 5 行。
+[P389] Filter rows=2：满足 a > 1 AND b < 10 的记录共 2 行。
+[P392] Project rows=2：投影不改变行数，最终输出 2 行。
+[P394] 3.2 示例：选择运算下推
+[P395] 3.2.1 数据准备
+[P396] CREATE TABLE orders (	order_id int,	customer_id int,	order_date char(40),	total_amount float);CREATE TABLE customers (	customer_id int,	name char(50),	email char(100),	address char(200));INSERT INTO customers VALUES (1, 'Alice', 'alice@example.com', 'A Street');INSERT INTO customers VALUES (2, 'Bob', 'bob@example.com', 'B Street');INSERT INTO customers VALUES (3, 'Carol', 'carol@example.com', 'C Street');INSERT INTO orders VALUES (101, 1, '2025-01-01', 500.0);INSERT INTO orders VALUES (102, 1, '2025-01-02', 1200.0);INSERT INTO orders VALUES (103, 2, '2025-01-03', 900.0);INSERT INTO orders VALUES (104, 2, '2025-01-04', 1500.0);INSERT INTO orders VALUES (105, 3, '2025-01-05', 700.0);
+[P397] 3.2.2 执行查询
+[P398] SELECT * FROM customers cJOIN orders o ON c.customer_id = o.customer_idWHERE o.total_amount > 1000;EXPLAIN ANALYZE SELECT * FROM customers cJOIN orders o ON c.customer_id = o.customer_idWHERE o.total_amount > 1000;
+[P399] SELECT 结果：
+[P400] | customer_id | name | email | address | order_id | customer_id | order_date | total_amount || 1 | Alice | alice@example.com | A Street | 102 | 1 | 2025-01-02 | 1200.000000 || 2 | Bob | bob@example.com | B Street | 104 | 2 | 2025-01-04 | 1500.000000 |
+[P401] EXPLAIN ANALYZE 期望输出：
+[P402] Project(columns=[*], rows=2)    Join(tables=[customers, orders], condition=[c.customer_id=o.customer_id], rows=2)        Scan(table=customers, type=SeqScan, rows=3)        Filter(condition=[o.total_amount>1000], rows=6)            Scan(table=orders, type=SeqScan, rows=15)
+[P403] 说明：
+[P405] Scan(table=customers) rows=3：customers 表作为左侧外表，单次扫描 3 行。
+[P408] Filter 节点被下推到 orders 表扫描之上，但 orders 仍是 customers c JOIN orders o 中的右侧内表。
+[P411] Scan(table=orders) rows=15：orders 表作为右侧内表，被 customers 的 3 行重复扫描，共访问 3 × 5 = 15 行。
+[P414] Filter rows=6：每次扫描 orders 时都有 2 条订单满足 o.total_amount > 1000，累计输出 3 × 2 = 6 行。
+[P417] Join rows=2：过滤后的订单与当前外表客户匹配后，共输出 2 行。
+[P419] 3.3 示例：投影下推
+[P420] 3.3.1 数据准备
+[P421] CREATE TABLE orders (	order_id int,	customer_id int,	order_date char(40),	total_amount float);CREATE TABLE customers (	customer_id int,	name char(50),	email char(100),	address char(200));INSERT INTO customers VALUES (1, 'Alice', 'alice@example.com', 'A Street');INSERT INTO customers VALUES (2, 'Bob', 'bob@example.com', 'B Street');INSERT INTO customers VALUES (3, 'Carol', 'carol@example.com', 'C Street');INSERT INTO orders VALUES (101, 1, '2025-01-01', 500.0);INSERT INTO orders VALUES (102, 1, '2025-01-02', 1200.0);INSERT INTO orders VALUES (103, 2, '2025-01-03', 900.0);INSERT INTO orders VALUES (104, 2, '2025-01-04', 1500.0);INSERT INTO orders VALUES (105, 3, '2025-01-05', 700.0);
+[P422] 3.3.2 执行查询
+[P423] SELECT c.name, o.order_idFROM customers cJOIN orders o ON c.customer_id = o.customer_id;EXPLAIN ANALYZE SELECT c.name, o.order_idFROM customers cJOIN orders o ON c.customer_id = o.customer_id;
+[P424] SELECT 结果：
+[P425] | name | order_id || Alice | 101 || Alice | 102 || Bob | 103 || Bob | 104 || Carol | 105 |
+[P426] EXPLAIN ANALYZE 期望输出：
+[P427] Project(columns=[c.name, o.order_id], rows=5)    Join(tables=[customers, orders], condition=[c.customer_id=o.customer_id], rows=5)        Project(columns=[c.customer_id, c.name], rows=3)            Scan(table=customers, type=SeqScan, rows=3)        Project(columns=[o.customer_id, o.order_id], rows=15)            Scan(table=orders, type=SeqScan, rows=15)
+[P428] 说明：
+[P430] customers 作为 NLJ 的左侧外表，单次扫描 3 行。
+[P433] orders 表作为右侧内表，被 customers 的 3 行重复扫描，共访问 3 × 5 = 15 行，因此右侧 Project rows=15、Scan rows=15。
+[P436] 投影下推后，customers 侧仅保留 c.customer_id,c.name，orders 侧仅保留 o.customer_id,o.order_id。
+[P439] Join rows=5：最终连接结果为 5 行。
+[P441] 3.4 评测说明
+[P442] EXPLAIN ANALYZE SELECT ... 只向输出文件写入执行计划与统计信息，不再额外写入 SELECT 查询结果。
+[P443] 评测系统将按照以下流程对选手的提交进行自动化测评：
+[P445] 初始化：创建表并导入基准测试数据集。
+[P448] 执行标准查询：检查普通 SELECT 查询结果是否正确。
+[P451] 执行 EXPLAIN ANALYZE：检查优化后的计划树结构是否符合选择下推、投影下推和连接顺序优化规则。
+[P454] 检查运行时统计：检查每个计划节点的 rows 是否与本次执行时涉及的总行数一致。
+[P455] 5. 2026题目五：聚合函数与分组统计
+[P456] 前置题目：查询执行
+[P457] 题目种类：基础功能
+[P458] 代码框架：https://gitlab.eduxiji.net/csc1/csc-db/db2026/-/tree/main/rmdb
+[P460] 题目描述:
+[P461] 本题目要求实现聚合函数与分组统计。聚合函数：对一组值进行计算并返回单一的值，通过使用SQL聚合函数，可以确定数值集合的各种统计值。分组统计：将查询结果按照1个或者多个字段进行分组，字段值相同的为同一组。
+[P463] 要求：
+[P464] l 聚合函数COUNT(expr)：其中expr可以是列名、"*"。count(*)统计元组个数，count(列名)统计一列中值的个数。该函数仅需支持int、float、char类型的字段。
+[P465] l 聚合函数MAX(expr)：返回一列中的最大值。该函数仅需支持int、float类型的字段。
+[P466] l 聚合函数MIN(expr)：返回一列中的最小值。该函数仅需支持int、float类型的字段。
+[P467] l 聚合函数SUM(expr)：返回数值列的总数。该函数仅需支持int、float类型的字段。
+[P468] l 聚合函数AVG(expr): 返回一列中的平均值。该函数仅需支持int、float类型的字段。
+[P469] l 分组统计(group by、having)：group by子句根据一个或多个列对结果集进行分组，可以使用having子句对每一个分组按条件进行过滤。分组属性仅需支持int、float、char类型的字段。
+[P470] l 排序统计：order by子句对最终结果按照一个或多个列进行排序，并可指定升序ASC或降序DESC，默认采用ASC。可以使用limit关键字限制查询结果的数量。
+[P473] 测试示例：
+[P474] 测试点1：单独使用聚合函数
+[P475] 测试示例:
+[P476] create table grade (course char(20),id int,score float);
+[P477] insert into grade values('DataStructure',1,95);
+[P478] insert into grade values('DataStructure',2,93.5);
+[P479] insert into grade values('DataStructure',4,87);
+[P480] insert into grade values('DataStructure',3,85);
+[P481] insert into grade values('DB',1,94);
+[P482] insert into grade values('DB',2,74.5);
+[P483] insert into grade values('DB',4,83);
+[P484] insert into grade values('DB',3,87);
+[P485] select MAX(id) as max_id from grade;
+[P486] select MIN(score) as min_score from grade where course = 'DB';
+[P487] select AVG(score) as avg_score from grade where course = 'DataStructure';
+[P488] select COUNT(course) as course_num from grade;
+[P489] select COUNT(*) as row_num from grade;
+[P490] select COUNT(*) as row_num from grade where score < 60;
+[P491] select SUM(score) as sum_score from grade where id = 1;
+[P492] drop table grade;
+[P493] 期待输出：
+[P494] | max_id |
+[P495] | 4 |
+[P496] | min_score |
+[P497] | 74.500000 |
+[P498] | avg_score |
+[P499] | 90.125000 |
+[P500] | course_num |
+[P501] | 8 |
+[P502] | row_num |
+[P503] | 8 |
+[P504] | row_num |
+[P505] | 0 |
+[P506] | sum_score |
+[P507] | 189.000000 |
+[P509] 测试点2：聚合函数加分组统计
+[P510] 测试示例:
+[P511] create table grade (course char(20),id int,score float);
+[P512] insert into grade values('DataStructure',1,95);
+[P513] insert into grade values('DataStructure',2,93.5);
+[P514] insert into grade values('DataStructure',3,94.5);
+[P515] insert into grade values('ComputerNetworks',1,99);
+[P516] insert into grade values('ComputerNetworks',2,88.5);
+[P517] insert into grade values('ComputerNetworks',3,92.5);
+[P518] insert into grade values('C++',1,92);
+[P519] insert into grade values('C++',2,89);
+[P520] insert into grade values('C++',3,89.5);
+[P521] select id,MAX(score) as max_score,MIN(score) as min_score,SUM(score) as sum_score from grade group by id;
+[P522] select id,MAX(score) as max_score from grade group by id having COUNT(*) >  3;
+[P523] insert into grade values ('ParallelCompute',1,100);
+[P524] select id,MAX(score) as max_score from grade group by id having COUNT(*) >  3;
+[P525] select id,MAX(score) as max_score,MIN(score) as min_score from grade group by id having COUNT(*) > 1 and MIN(score) > 88;
+[P526] select course ,COUNT(*) as row_num , COUNT(id) as student_num , MAX(score) as top_score, MIN(score) as lowest_score from grade group by course;
+[P527] select course, id, score from grade order by score desc;
+[P528] drop table grade;
+[P529] 期待输出：
+[P530] | id | max_score | min_score | sum_score |
+[P531] | 1 |  99.000000 | 92.000000 | 286.000000 |
+[P532] | 2 |  93.500000 | 88.500000 | 271.000000 |
+[P533] | 3 |  94.500000 | 89.500000 | 276.500000 |
+[P534] | id | max_score |
+[P535] | id | max_score |
+[P536] | 1 | 100.000000 |
+[P537] | id | max_score | min_score |
+[P538] | 1 | 100.000000 | 92.000000 |
+[P539] | 2 | 93.500000 | 88.500000 |
+[P540] | 3 | 94.500000 | 89.500000 |
+[P541] | course | row_num | student_num | top_score | lowest_score |
+[P542] | DataStructure | 3 | 3 | 95.000000 | 93.500000 |
+[P543] | ComputerNetworks | 3 | 3 | 99.000000 | 88.500000 |
+[P544] | C++ | 3 | 3 | 92.000000 | 89.000000 |
+[P545] | ParallelCompute | 1 | 1 | 100.000000 | 100.000000 |
+[P546] | course | id | score |
+[P547] | ParallelCompute | 1 | 100.000000 |
+[P548] | ComputerNetworks | 1 | 99.000000 |
+[P549] | DataStructure | 1 | 95.000000 |
+[P550] | DataStructure | 3 | 94.500000 |
+[P551] | DataStructure | 2 | 93.500000 |
+[P552] | ComputerNetworks | 3 | 92.500000 |
+[P553] | C++ | 1 | 92.000000 |
+[P554] | C++ | 3 | 89.500000 |
+[P555] | C++ | 2 | 89.000000 |
+[P556] | ComputerNetworks | 2 | 88.500000 |
+[P558] 测试点3：健壮性测试
+[P559] 测试示例:
+[P560] create table grade (course char(20),id int,score float);
+[P561] insert into grade values('DataStructure',1,95);
+[P562] insert into grade values('DataStructure',2,93.5);
+[P563] insert into grade values('DataStructure',3,94.5);
+[P564] insert into grade values('ComputerNetworks',1,99);
+[P565] insert into grade values('ComputerNetworks',2,88.5);
+[P566] insert into grade values('ComputerNetworks',3,92.5);
+[P567] -- SELECT 列表中不能出现没有在 GROUP BY 子句中的非聚集列
+[P568] select id , score from grade group by course;
+[P569] -- WHERE 子句中不能用聚集函数作为条件表达式
+[P570] select id, MAX(score) as max_score from grade where MAX(score) > 90 group by id;
+[P571] 期待输出：
+[P572] failure
+[P573] failure
+[P575] 测试输出要求：
+[P576] 本题目的输出要求写入数据库文件夹下的output.txt文件中，例如测试数据库名称为execution_test_db，则在测试时使用./bin/rmdb execution_test_db命令来启动服务端，对应输出应写入buid/execution_test_db/output.txt文件中。
+[P578] 前置题目：存储管理、B+树索引、查询执行、聚合函数与分组统计
+[P579] 题目种类：基础功能
+[P580] 推荐知识点：Union 集合算子
+[P581] 大赛框架：https://gitlab.eduxiji.net/csc1/csc-db/db2026/-/tree/main/rmdb
+[P583] 1 赛题背景
+[P584] 集合操作是 SQL 语言的核心功能之一。Union 算子用于合并多个分支查询的元组集合并去除重复元组，是大数据分析、多源数据融合等场景的关键算子。本赛题要求支持 Union 操作，并对结果集排序。
+[P586] 2 题目总览
+[P587] 本题要求参赛者在 RMDB 中实现 Union 算子，并针对查询间数据模式一致性、数据类型转换等场景完善健壮性保证机制，同时支持对 Union 的输出执行 ORDER BY 整体排序。
+[P589] 3 题目 6.1：Union 算子实现与 ORDER BY 支持
+[P590] 3.1 题目描述
+[P591] 本小题要求实现 Union 算子，并支持对 Union 结果进行整体排序。
+[P592] 记该物理算子为 U，U 包含了 n 个子节点构成的列表 {R1, R2, ..., Rn}（其中 n ≥ 2）。U 遍历所有子节点，收集全部元组后去除重复元组（所有对应列的值均相等），最终返回去重后的元组集合。
+[P593] ORDER BY 子句作用于 Union 算子的最终输出，需支持多列排序与 ASC/DESC 指定。排序键限定在 Union 输出列的子集（默认引用第一个子节点的列名）。
+[P594] 测试用例会将 Union 结果作为 FROM 子句中的派生表使用，形式如下：
+[P595] SELECT * FROM (<select_stmt> UNION <select_stmt> [UNION <select_stmt> ...]) AS aliasORDER BY ...
+[P596] 参赛者需支持上述派生表语法，至少覆盖 Union 结果作为外层 SELECT * 数据源的场景；当外层带有 ORDER BY 时，排序作用于 Union 的整体输出，列名按照 Union 输出列解析。
+[P597] 3.2 提示
+[P599] 可将 U 视作多叉树结构进行处理，也可以将 U 转换为左深、右深结构处理。
+[P602] 去重可基于哈希表实现，也可基于排序实现。
+[P605] Union 的输出列名默认继承自第一个子节点 R1 的列名。
+[P608] 对于多列排序，需按排序键列表顺序依次比较；未显式指定时默认按 ASC 处理。
+[P610] 3.3 测试示例
+[P611] CREATE TABLE orders1 (    order_id INT,    amount FLOAT,    region CHAR(10));CREATE TABLE orders2 (    order_id INT,    amount FLOAT,    region CHAR(10));CREATE TABLE orders3 (    order_id INT,    amount FLOAT,    region CHAR(10));INSERT INTO orders1 VALUES (1, 150.0, 'Beijing');INSERT INTO orders1 VALUES (2, 230.5, 'Shanghai');INSERT INTO orders1 VALUES (3, 89.99, 'Guangzhou');INSERT INTO orders2 VALUES (1, 150.0, 'Beijing');INSERT INTO orders2 VALUES (4, 120.0, 'Shenzhen');INSERT INTO orders2 VALUES (5, 560.0, 'Chengdu');INSERT INTO orders3 VALUES (1, 150.0, 'Beijing');INSERT INTO orders3 VALUES (6, 199.99, 'Wuhan');SELECT * FROM    (SELECT * FROM orders1     UNION     SELECT * FROM orders2     UNION     SELECT * FROM orders3) AS all_ordersORDER BY amount DESC;
+[P612] 预期结果：
+[P613] | order_id | amount | region || 5 | 560 | Chengdu || 2 | 230.5 | Shanghai || 6 | 199.99 | Wuhan || 1 | 150 | Beijing || 4 | 120 | Shenzhen || 3 | 89.99 | Guangzhou |
+[P615] 4 题目 6.2：类型系统兼容性与异常处理
+[P616] 4.1 题目描述
+[P617] Union 的语义正确性依赖于分支查询间的数据模式兼容性约束。本小题要求在查询分析阶段实现完备的数据模式检验机制：严格保证各分支查询返回的列数量一致，且对应位置列的数据类型满足兼容性判定 (类型相同或支持隐式转换)；在执行阶段，Union 算子需执行统一的数据类型提升策略，将相应列的数据类型转换为公共超类型，确保各分支查询的异构元组最终遵循统一的数据模式。
+[P618] 4.2 提示
+[P619] 公共超类型是指能够无损容纳所有分支查询对应列数据类型的最通用类型。对于本小题，只需要考虑下面两种情况。
+[P620] 数据类型提升与对应的公共超类型：
+[P622] INT 与 FLOAT ⇒ FLOAT
+[P625] CHAR(n) 与 CHAR(m) ⇒ CHAR(max(n, m))，按照字符串实际长度输出即可，无需增添空格。
+[P627] 4.3 测试示例
+[P628] CREATE TABLE orders1 (    order_id INT,    amount INT,    region CHAR(10));CREATE TABLE orders2 (    order_id INT,    amount FLOAT,    region CHAR(20));-- 错误示例 1：列数量不一致SELECT * FROM    (SELECT amount FROM orders1     UNION     SELECT * FROM orders2    ) AS all_orders;-- 错误示例 2：数据类型不兼容SELECT * FROM    (SELECT amount FROM orders1     UNION     SELECT region FROM orders2    ) AS all_orders;-- 错误示例 3：ORDER BY 出现未知列SELECT * FROM    (SELECT amount FROM orders1     UNION     SELECT amount FROM orders2    ) AS all_ordersORDER BY order_id ASC;-- 类型提升测试示例-- amount 列：INT 与 FLOAT 提升为 FLOAT-- region 列：CHAR(10) 与 CHAR(20) 提升为 CHAR(20)-- 预期结果的第一行（虚线部分）数据模式无需返回。SELECT * FROM    (SELECT * FROM orders1     UNION     SELECT * FROM orders2    ) AS all_ordersORDER BY amount DESC, order_id ASC;
+[P629] 错误示例预期结果：
+[P631] 错误示例 1 → failure
+[P634] 错误示例 2 → failure
+[P637] 错误示例 3 → failure
+[P639] 类型提升测试预期结果：
+[P640] 数据模式：INT | FLOAT | CHAR(20)
+[P641] | order_id | amount | region || ... | ... | ... || ... | ... | ... || ... | ... | ... || ... | ... | ... || ... | ... | ... |
+[P642] 7. 2026题目七：嵌套循环连接及其优化
+[P643] 前置题目：存储管理、B+树索引、查询执行
+[P644] 题目种类：基础功能
+[P645] 推荐知识点：查询优化、运行时统计
+[P646] 大赛框架：https://gitlab.eduxiji.net/csc1/csc-db/db2026/-/tree/main/rmdb
+[P648] 1. 题目描述
+[P649] 在数据库系统中，连接 (Join) 操作的效率直接决定了复杂查询的响应速度。本题要求选手实现从基础的嵌套循环连接到索引嵌套循环连接的物理执行路径优化。
+[P650] 1.1 嵌套循环连接 (Nested Loop Join, NLJ)
+[P651] 基础的 Nested Loop Join 采用双层循环嵌套的逻辑。对于外表（驱动表） RR 中的每一行元组 rr，算子都会触发内表（被驱动表） SS 的一次全量扫描。
+[P652] 逻辑伪代码实现：
+[P653] for tuple_r in R:          # 外层循环 (驱动表)    for tuple_s in S:      # 内层循环 (被驱动表)        if condition(r, s):            output(r, s)
+[P655] 原理：通过笛卡尔积式的遍历，对每一对 (r,s)(r,s) 元组应用连接谓词。
+[P658] 复杂度：若表规模分别为 NN 和 MM，则时间复杂度为 O(N×M)O(N×M)。
+[P661] 执行特征：内侧 Scan 节点表现为 SeqScan，被调用次数等于外表的行数。
+[P663] 1.2 索引嵌套循环连接 (Index Nested Loop Join, INLJ)
+[P664] 在本题中，当内表的连接属性存在唯一索引时，可以利用索引将内层的全量扫描优化为索引点查，即Index Nested Loop Join。
+[P666] 原理：外表每读取一行，提取连接键值 (Join Key)，直接作为参数传递给内层的索引扫描接口。系统仅检索与该键值匹配的特定行，而非扫描整张表。
+[P669] 复杂度：时间复杂度优化为 O(N×log⁡M)O(N×logM)。对于大数据量，这种优化将带来量级的性能提升。
+[P672] 执行特征：内侧 Scan 节点自动切换为 IndexScan，且内表算子由基础的全表遍历切换为基于索引的遍历。
+[P674] 1.3 本题约束与输出约定
+[P675] 本题考察两表及多表等值内连接，需要选手支持普通 SELECT ... FROM ... JOIN ... ON ... 查询和 EXPLAIN ANALYZE SELECT ... FROM ... JOIN ... ON ... 查询。完整语法形式如下：
+[P676] SELECT table1.column1, table2.column2, ...FROM table1JOIN table2 ON table1.join_column = table2.join_column [AND table1.column = table2.column ...][JOIN table3 ON table1.join_column = table3.join_column [AND table1.column = table3.column ...] ...];EXPLAIN ANALYZE SELECT table1.column1, table2.column2, ...FROM table1JOIN table2 ON table1.join_column = table2.join_column [AND table1.column = table2.column ...][JOIN table3 ON table1.join_column = table3.join_column [AND table1.column = table3.column ...] ...];
+[P677] 每个 JOIN ... ON 只包含表列之间的等值连接条件，例如 a.id = b.a_id；多个连接条件可用 AND 连接。
+[P678] 嵌套循环连接的执行形态固定为左深树：表1 JOIN 表2 JOIN 表3 按 ((表1 JOIN 表2) JOIN 表3) 执行。第一个表是初始外表/驱动表；每遇到一个新的 JOIN 右表 ON ...，当前已经得到的左侧 Join 结果作为外表/驱动输入，右表 作为内表/被驱动输入。例如 FROM a JOIN b ON a.id=b.a_id JOIN c ON a.id=c.a_id 的执行树为 (a JOIN b) JOIN c，其中第二层 Join 的外表是 a JOIN b 的结果，内表是 c。
+[P679] 索引创建语法与前置题目保持一致，且本题只涉及单列建索引形式：
+[P680] CREATE INDEX table_name(column_name);
+[P681] INLJ 阶段只会在各级 Join 的右侧内表连接列上建索引，并且保证这些索引列取值唯一。
+[P682] EXPLAIN ANALYZE 的输出为文本形式的执行计划与运行时统计，不输出该查询本身的结果集。每个计划节点的 rows=N 表示该节点本次执行时涉及的总行数。在 NLJ 中右表作为内表会被左表重复扫描，因此右侧 SeqScan rows 可以累计到 左表行数 × 右表行数；在 INLJ 中使用右表唯一索引进行点查时，右侧 IndexScan rows 只统计命中的行数。
+[P683] 本题中 EXPLAIN ANALYZE 中的算子输出规范如下：
+[P684] 计划树输出时，根节点行首不缩进，每深入一层在行首增加一个制表符 \t，同一层级节点使用相同数量的 \t 缩进，不使用空格代替制表符。Join 节点的两个子树按照实际执行顺序输出，左侧子树表示外表或已经连接得到的中间结果，右侧子树表示内表。
+[P686] 2. 评分标准
+[P687] 每个测试点都会分别执行无索引 NLJ 阶段和建索引后的 INLJ 阶段，检查普通 SELECT 结果和 EXPLAIN ANALYZE 计划输出。在 test4 中 当 tINLJ/tNLJtINLJ​/tNLJ​ < 0.5 时评定为性能达标。
+[P689] 3. 测评示例
+[P690] 3.1 双表连接示例
+[P691] 3.1.1 数据准备
+[P692] CREATE TABLE departments (dept_id int, dept_name char(20));CREATE TABLE employees (emp_id int, dept_id int, emp_name char(20), salary int);INSERT INTO departments VALUES (10, 'Finance');INSERT INTO departments VALUES (20, 'HR');INSERT INTO departments VALUES (30, 'Sales');INSERT INTO departments VALUES (40, 'Engineering');INSERT INTO departments VALUES (50, 'Marketing');INSERT INTO employees VALUES (1, 10, 'Alice', 65000);INSERT INTO employees VALUES (2, 20, 'Bob', 48000);INSERT INTO employees VALUES (3, 30, 'Charlie', 52000);INSERT INTO employees VALUES (4, 40, 'Diana', 70000);INSERT INTO employees VALUES (5, 50, 'Eve', 55000);
+[P693] 说明：
+[P695] departments 表（左表/驱动表）5 行，dept_id 为部门编号。
+[P698] employees 表（右表/被驱动表）5 行，每个员工属于唯一部门，dept_id 值各不相同。
+[P701] JOIN 结果为一一对应，共 5 行。
+[P703] 3.1.2 无索引：NLJ
+[P704] 执行如下命令，先确认结果正确性，再观察执行计划：
+[P705] SELECT departments.dept_name, employees.emp_name FROM departments JOIN employees ON departments.dept_id = employees.dept_id;EXPLAIN ANALYZE SELECT departments.dept_name, employees.emp_name FROM departments JOIN employees ON departments.dept_id = employees.dept_id;
+[P706] SELECT 结果：
+[P707] | dept_name | emp_name || Finance | Alice || HR | Bob || Sales | Charlie || Engineering | Diana || Marketing | Eve |
+[P708] EXPLAIN ANALYZE 期望输出：
+[P709] Project(columns=[departments.dept_name, employees.emp_name], rows=5)    Join(tables=[departments, employees], condition=[departments.dept_id=employees.dept_id], rows=5)        Project(columns=[departments.dept_id, departments.dept_name], rows=5)            Scan(table=departments, type=SeqScan, rows=5)        Project(columns=[employees.dept_id, employees.emp_name], rows=25)            Scan(table=employees, type=SeqScan, rows=25)
+[P710] 说明：
+[P712] Join rows=5：最终 Join 产出 5 行。
+[P715] 右侧 Scan rows=25：NLJ 中右表作为内表被左表 5 行重复全表扫描，共访问 5 × 5 = 25 行。
+[P718] 没有 WHERE 谓词时，不应输出 Filter 节点；连接条件应出现在 Join(condition=[...]) 中。
+[P720] 3.1.3 有索引：INLJ
+[P721] CREATE INDEX employees(dept_id);SELECT departments.dept_name, employees.emp_name FROM departments JOIN employees ON departments.dept_id = employees.dept_id;EXPLAIN ANALYZE SELECT departments.dept_name, employees.emp_name FROM departments JOIN employees ON departments.dept_id = employees.dept_id;
+[P722] SELECT 结果（与 NLJ 结果相同）：
+[P723] | dept_name | emp_name || Finance | Alice || HR | Bob || Sales | Charlie || Engineering | Diana || Marketing | Eve |
+[P724] EXPLAIN ANALYZE 期望输出：
+[P725] Project(columns=[departments.dept_name, employees.emp_name], rows=5)    Join(tables=[departments, employees], condition=[departments.dept_id=employees.dept_id], rows=5)        Project(columns=[departments.dept_id, departments.dept_name], rows=5)            Scan(table=departments, type=SeqScan, rows=5)        Project(columns=[employees.dept_id, employees.emp_name], rows=5)            Scan(table=employees, type=IndexScan, using_index=(dept_id), rows=5)
+[P726] 说明：
+[P728] Scan type 变为 IndexScan，且使用右表连接列 dept_id 上的索引。
+[P731] 右侧 Scan rows=5：由于使用了唯一索引点查（Lookup），内表仅根据连接键精确读取匹配行，无需全表扫描。
+[P734] 右表访问行数从 25 降为 5，性能提升显著。
+[P736] 3.2 多表连接示例
+[P737] 此处示例为三表连接查询。
+[P738] 3.2.1 数据准备
+[P739] CREATE TABLE departments (dept_id int, dept_name char(20));CREATE TABLE employees (emp_id int, dept_id int, emp_name char(20));CREATE TABLE offices (office_id int, dept_id int, office_name char(20));INSERT INTO departments VALUES (10, 'Finance');INSERT INTO departments VALUES (20, 'HR');INSERT INTO departments VALUES (30, 'Sales');INSERT INTO employees VALUES (1, 10, 'Alice');INSERT INTO employees VALUES (2, 20, 'Bob');INSERT INTO employees VALUES (3, 30, 'Charlie');INSERT INTO offices VALUES (101, 10, 'HQ');INSERT INTO offices VALUES (102, 20, 'Remote');INSERT INTO offices VALUES (103, 30, 'Field');
+[P740] 3.2.2 无索引：NLJ
+[P741] 执行如下命令：
+[P742] SELECT departments.dept_name, employees.emp_name, offices.office_nameFROM departmentsJOIN employees ON departments.dept_id = employees.dept_idJOIN offices ON departments.dept_id = offices.dept_id;
+[P743] SELECT 结果：
+[P744] | dept_name | emp_name | office_name || Finance | Alice | HQ || HR | Bob | Remote || Sales | Charlie | Field |
+[P745] 无索引时的 EXPLAIN ANALYZE 结果如下：
+[P746] Project(columns=[departments.dept_name, employees.emp_name, offices.office_name], rows=3)    Join(tables=[departments, employees, offices], condition=[departments.dept_id=offices.dept_id], rows=3)        Join(tables=[departments, employees], condition=[departments.dept_id=employees.dept_id], rows=3)            Project(columns=[departments.dept_id, departments.dept_name], rows=3)                Scan(table=departments, type=SeqScan, rows=3)            Project(columns=[employees.dept_id, employees.emp_name], rows=9)                Scan(table=employees, type=SeqScan, rows=9)        Project(columns=[offices.dept_id, offices.office_name], rows=9)            Scan(table=offices, type=SeqScan, rows=9)
+[P747] 3.2.3 有索引：INLJ
+[P748] 先为每个 Join 层级的右侧内表连接列创建索引：
+[P749] CREATE INDEX employees(dept_id);CREATE INDEX offices(dept_id);SELECT departments.dept_name, employees.emp_name, offices.office_nameFROM departmentsJOIN employees ON departments.dept_id = employees.dept_idJOIN offices ON departments.dept_id = offices.dept_id;EXPLAIN ANALYZE SELECT departments.dept_name, employees.emp_name, offices.office_nameFROM departmentsJOIN employees ON departments.dept_id = employees.dept_idJOIN offices ON departments.dept_id = offices.dept_id;
+[P750] SELECT 结果（与无索引结果相同）：
+[P751] | dept_name | emp_name | office_name || Finance | Alice | HQ || HR | Bob | Remote || Sales | Charlie | Field |
+[P752] 建索引后的 EXPLAIN ANALYZE 结果如下：
+[P753] Project(columns=[departments.dept_name, employees.emp_name, offices.office_name], rows=3)    Join(tables=[departments, employees, offices], condition=[departments.dept_id=offices.dept_id], rows=3)        Join(tables=[departments, employees], condition=[departments.dept_id=employees.dept_id], rows=3)            Project(columns=[departments.dept_id, departments.dept_name], rows=3)                Scan(table=departments, type=SeqScan, rows=3)            Project(columns=[employees.dept_id, employees.emp_name], rows=3)                Scan(table=employees, type=IndexScan, using_index=(dept_id), rows=3)        Project(columns=[offices.dept_id, offices.office_name], rows=3)            Scan(table=offices, type=IndexScan, using_index=(dept_id), rows=3)
+[P754] 3.3 评测说明
+[P755] EXPLAIN ANALYZE SELECT ... 只向输出文件写入执行计划与统计信息，不再额外写入 SELECT 查询结果。
+[P756] 评测系统将按照以下流程对选手的提交进行自动化测评：
+[P758] 初始化：创建表并导入基准测试数据集，此时不会创建任何辅助索引。
+[P761] NLJ 测试：
+[P764] 执行标准查询并记录耗时 t1t1​。检查结果集是否正确。
+[P767] 执行 EXPLAIN ANALYZE。检查执行计划是否符合逻辑。
+[P770] 索引构建：在内表连接字段上执行 CREATE INDEX table_name(column_name);。
+[P773] INLJ 测试：
+[P776] 再次执行标准查询并记录耗时 t2t2​。检查结果集是否依然正确。
+[P779] 执行 EXPLAIN ANALYZE。检查执行计划是否符合逻辑。
+[P782] 性能记录：对大数据测试点记录加速比，用于检测 INLJ 是否确实带来性能收益。
+[P784] 8. 2026题目八：事务控制语句
+[P785] 前置题目：查询执行、唯一索引(部分测试点涉及索引)
+[P786] 题目种类：基本功能
+[P787] 推荐知识点：事务的基本概念
+[P788] 代码框架：https://gitlab.eduxiji.net/csc1/csc-db/db2026/-/tree/main/rmdb
+[P790] 题目描述：
+[P791] 系统需要支持显示开启事务（begin）、提交事务（commit）、回滚事务（abort）三条事务控制语句，显式事务中只包含增删改查四种语句，不包含DDL语句。在大赛提供的框架中，单条语句被包装成一个单独的事务进行执行，参赛队伍可以自行更改。在本任务中，不需要考虑并发事务的执行，测试数据中不包含并发事务。
+[P792] 在完成本任务之前，参赛队伍可以首先阅读项目结构文档中事务管理器的相关说明，以及代码框架中src/transaction文件夹下的代码文件。
+[P794] 提示：功能题目对代码框架没有限制，参赛队伍可以在原有框架的基础上进行实现，也可以修改、增添、删除数据结构及接口，或者对框架进行重构。
+[P796] 测试示例：
+[P797] 本测试通过包含四个测试点，分别测试有索引和无索引情况下事务的提交与回滚，其中有索引的测试数据中包含时间类型，但不包含不合法的时间类型，测试数据为TPC-C中的NewOrder事务。测试语句格式如下：
+[P798] create table student (id int, name char(8), score float);
+[P799] insert into student values (1, 'xiaohong', 90.0);
+[P800] begin;
+[P801] insert into student values (2, 'xiaoming', 99.0);
+[P802] delete from student where id = 2;
+[P803] abort;
+[P804] select * from student;
+[P805] 期待输出：
+[P806] | id | name | score |
+[P807] | 1 | xiaohong | 90.000000 |
+[P809] 测试输出要求：
+[P810] 本题目的输出要求写入数据库文件夹下的output.txt文件中，例如测试数据库名称为transaction_test_db，则在测试时使用./bin/rmdb transaction_test_db命令来启动服务端，对应输出应写入buid/transaction_test_db/output.txt文件中。
+[P812] 9. 2026题目九：可配置的快照隔离与可串行化隔离级别
+[P813] 前置题目：查询执行、事务控制语句
+[P814] 题目种类：基础功能
+[P815] 推荐知识点：事务可见性、隔离级别、快照隔离、可串行化、多版本并发控制、Serializable Snapshot Isolation、写写冲突、读写反依赖
+[P816] 题目描述
+[P817] 事务隔离级别决定了并发事务之间的可见性和冲突处理方式。不同隔离级别下，同一组交错执行的 SQL 语句可能产生不同的提交、回滚和查询结果。
+[P818] 本题聚焦于在 RMDB 中实现可配置的事务隔离级别：系统需要支持 SNAPSHOT ISOLATION 和 SERIALIZABLE，并能够通过 SQL 语句在运行时显式设置当前会话使用的隔离级别。测试只覆盖以下两种隔离级别：
+[P820] SNAPSHOT ISOLATION
+[P823] SERIALIZABLE
+[P825] 下文中，SI 表示 SNAPSHOT ISOLATION，SER 表示 SERIALIZABLE。
+[P826] 本题采用如下隔离级别模型：
+[P828] SI 需要实现为基于 MVCC 的事务级快照隔离。
+[P831] SER 需要实现为基于 MVCC 快照读的 Serializable Snapshot Isolation 风格判分模型，下文简称 SSI。
+[P833] 判分以本文定义的 MVCC 与 SSI 风格语义为准，检查 SQL 输出、事务回滚行为和最终数据库状态。
+[P834] 语法要求
+[P835] 系统需要支持以下语句：
+[P836] SET TRANSACTION ISOLATION LEVEL SNAPSHOT ISOLATION;SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+[P837] 其中：
+[P839] SET TRANSACTION ISOLATION LEVEL ...; 用于显式设置当前会话后续新开启事务的隔离级别。
+[P842] 除语法测试外，同一语义测试点内只会使用一种隔离级别，不会混合执行 SNAPSHOT ISOLATION 与 SERIALIZABLE，但不同语义测试点采用的隔离级别可能不同。
+[P845] 每个会话中 SET TRANSACTION ISOLATION LEVEL ...; 只在会话开启后执行一次，不会出现事务BEGIN后再重新设置隔离级别的情况。
+[P848] 显式事务中只包含增删改查四类语句，不包含 DDL 语句。
+[P850] 功能要求
+[P851] 参赛队伍需要实现以下能力：
+[P853] 按当前事务隔离级别提供正确的事务可见性。
+[P856] 写操作需要保留旧版本，或保留恢复旧版本所需的信息 (如Undo Log)，不能破坏事务按 MVCC 可见性规则应当看到的数据。
+[P859] 已提交事务产生的写入结果，需要在满足隔离级别语义时对其他事务可见。
+[P862] 事务应始终能读到自己已经写入但尚未提交的数据。
+[P865] 支持显式事务的开始、提交与回滚。
+[P868] 事务开始时需要记录本事务使用的隔离级别和快照标识；若为 SER 事务，还需要初始化读集合、写集合和依赖关系记录。
+[P871] 事务提交后，依据隔离级别定义判断其他事务对该提交事务写入结果的可见性。
+[P874] 事务回滚后，其在回滚前执行的 INSERT、UPDATE、DELETE 应等价于从未发生，且对其他事务不可见。
+[P877] 在 SI 和 SER 下均需检测同一记录上的写写冲突。
+[P880] 若事务 A 尝试更新或删除一条记录，而该记录的最新可写状态已经被另一个未提交事务 B 修改，则该写语句需要返回 abort，并回滚事务 A。
+[P883] 若事务 A 基于旧快照尝试更新或删除一条记录，而该记录已经被其他事务在 A 开始之后提交修改，则该写语句需要返回 abort，并回滚事务 A。
+[P886] 支持 SI 与 SER 两种隔离级别的显式配置。
+[P889] 本题约定，除语法测试外，同一语义测试点的多个会话仅采用同一种隔离级别，不涉及混合隔离级别的并发执行，且每个会话都会先设置会话内隔离级别再执行事务。
+[P892] 系统需要在运行时根据 SET TRANSACTION ISOLATION LEVEL ...; 的配置选择后续事务的隔离级别。
+[P895] 满足 SI 与 SER 两种隔离级别的评测语义，其中 SI 按 MVCC 快照隔离级别评测，SER 按本文定义的 SSI 风格可串行化语义评测。
+[P897] 1. SNAPSHOT ISOLATION
+[P898] 本题中，SNAPSHOT ISOLATION 需要采用 MVCC 的事务级快照语义：
+[P900] 每个事务在 BEGIN; 时获得一个开始时间戳或等价的快照标识，记为 start_ts。
+[P903] 每个成功提交的事务获得一个单调递增的提交时间戳或等价的提交序，记为 commit_ts。
+[P906] 对事务 T，某条记录的可见版本是满足 commit_ts <= T.start_ts 的最新已提交版本，再叠加 T 自己当前事务内尚未提交的写入。
+[P909] 同一事务内对同一条件的多次读取，应基于同一个事务级快照返回结果；如果事务自身在两次读取之间写入了相关记录，则需要叠加自身写入后的结果。
+[P912] 写操作不得原地覆盖或删除仍可能被活跃事务读取到的旧版本。可以通过版本链、Undo Log、删除标记或其他等价结构保留或重建旧版本。
+[P915] 不允许脏读，不允许不可重复读。
+[P918] 该级别需要检测同一逻辑记录上的写写冲突。两个并发事务不能都基于同一旧版本成功写入同一逻辑记录。
+[P920] 2. SERIALIZABLE
+[P921] 本题中，SERIALIZABLE 采用基于 MVCC 快照读的 Serializable Snapshot Isolation 风格判分模型 (SSI)。SER 继承 SI 的 MVCC 事务级快照读，并额外跟踪事务之间的读写反依赖，用于阻止不可串行化的危险结构。为保证判分结果确定，本题固定采用“当前语句所在事务”为危险结构的回滚对象。
+[P922] 本题对 SER 的要求为：
+[P924] SER 事务的普通读取仍使用事务开始时的 MVCC 快照，并叠加本事务自身写入。
+[P927] SER 事务执行 SELECT 时，需要保存本次查询的读信息：
+[P930] 如果查询返回了某条记录，保存该记录的标识。
+[P933] 如果查询带有条件或扫描范围，保存该查询条件或扫描范围；即使本次查询结果为空也需要保存。
+[P936] 本题中的谓词读，指的就是事务保存过的查询条件或扫描范围。
+[P939] SER 事务执行 SELECT 时，还需要检查其他相关 SER 事务已经产生、但当前事务快照不可见的写入。这里的写入包括其他活跃事务已经执行但尚未提交的写入，以及已提交但当前事务快照不可见的写入。若该写入会改变本次 SELECT 的结果，则形成一条读写反依赖，记为 current_reader ->rw writer。检查这些不可见写入仅用于建立 rw 反依赖，不改变 SELECT 的快照读结果。
+[P942] SER 事务执行 INSERT、DELETE、UPDATE 时，需要将本次写操作影响的记录和其他相关 SER 事务保存的读信息比较：
+[P945] INSERT 检查新插入的记录。
+[P948] DELETE 检查被删除前的旧记录。
+[P951] UPDATE 同时检查更新前的旧记录和更新后的新记录。
+[P954] 如果被检查的记录是其他事务读过的记录，或满足其他事务保存过的查询条件或扫描范围，并且该读事务的快照中不包含本次写入，则形成一条读写反依赖，记为 reader ->rw current_writer。
+[P957] 读写反依赖 (rw 反依赖) 的含义是：读事务按旧快照完成了读取，而写事务的写入会改变该读取在串行执行中的结果。单条 rw 反依赖本身不一定导致回滚。
+[P960] SSI 危险结构指两个连续的 rw 反依赖：Tin ->rw Tpivot 和 Tpivot ->rw Tout。其中相关事务的执行区间存在重叠，并且满足 Tin = Tout，或 Tout 的提交顺序早于 Tin。
+[P963] 若某事务因执行某条 SELECT、INSERT、UPDATE 或 DELETE 语句新增了 rw 反依赖，并且新增后形成 SSI 危险结构，则执行该语句的事务需立即中止并回滚，该语句向客户端返回 abort。
+[P966] 所有 rw 反依赖应在 SELECT、INSERT、UPDATE、DELETE 执行时检测，且危险结构应在新增依赖的语句处处理。
+[P969] 同一逻辑记录上的写写冲突按 SI 规则处理；也就是两个并发事务不能都成功修改同一条旧版本记录。
+[P972] 已回滚或被系统中止的事务应视为从未发生。事务回滚后，其已经执行的 INSERT、UPDATE、DELETE 不应对其他事务可见，也不应影响最终数据库状态；该事务产生的写集合、读集合、谓词读记录以及 rw 反依赖关系应被清理，后续危险结构检测不应再受到该事务影响。
+[P974] 判分语义说明
+[P975] 为避免歧义，测试将按如下原则判断：
+[P977] SI 需要保证 MVCC 事务级快照的一致性和写写冲突检测。
+[P980] SER 需要在 SI 的基础上实现符合本文所定义的 SSI 风格语义，以及相应的 rw 反依赖跟踪和危险结构检测。
+[P983] 除语法测试外，单个测试点内只测试同一隔离级别，单个测试点内的每个会话都会被设置到相同隔离级别。设置为 SNAPSHOT ISOLATION 的测试点按 SI 规则判分；设置为 SERIALIZABLE 的测试点按 SER 规则判分。
+[P986] 未形成写写冲突或 SSI 危险结构的调度，按 MVCC 快照读结果和事务提交结果判分。
+[P989] 写写冲突需要在冲突写语句返回 abort，并回滚执行该写语句的事务。SELECT、INSERT、UPDATE 或 DELETE 语句在执行时对 rw 反依赖进行检测并记录；若新增 rw 反依赖后形成 SSI 危险结构，则由新增该依赖的语句返回 abort，并回滚该语句所在事务。
+[P991] 实现方法提示
+[P992] 以下提示仅供参考：
+[P994] 在会话状态中保存当前配置的隔离级别，并在 BEGIN; 时复制到事务上下文中。
+[P997] 为事务分配开始时间戳、提交时间戳或等价的可见性标识。
+[P1000] 为记录维护版本链、撤销日志 (Undo Log) 或其他可回溯的历史版本结构，以支持事务级快照读和回滚。
+[P1003] 事务应能够读到自己当前事务内尚未提交的写入。
+[P1006] SER 可以在 SI 的版本可见性基础上增加记录读集合、谓词读集合、写集合和事务依赖图。
+[P1009] 记录读可按记录标识跟踪；范围读、全表扫描和空结果查询可保存查询条件或扫描范围，用于在后续写操作时判断新旧记录是否会改变该次查询结果。
+[P1012] SER 实现时，可以在读语句执行时检查当前事务快照不可见、但会改变本次查询结果的其他事务写入，建立 current_reader ->rw writer；在写语句执行时用其他事务的记录读和谓词读建立 reader ->rw current_writer。每次新增 rw 反依赖后，都需要检查是否形成危险结构，若某条语句在执行时新增了 rw 依赖并形成了SSI危险结构，则中止该语句，向客户端报告 abort 并回滚该语句所在事务。
+[P1015] 已回滚或被系统中止的事务应视为从未发生。事务回滚后，其已经执行的 INSERT、UPDATE、DELETE 不应对其他事务可见，也不应影响最终数据库状态；该事务产生的读集合、谓词读记录、写集合以及 rw 反依赖关系应被清理，后续可见性判断、冲突检测和危险结构检测不应再受到该事务影响。
+[P1018] 事务提交后，其提交版本仍属于数据库状态。实现可以释放事务运行期的临时状态，但对于仍可能被并发 SER 事务用于 rw 反依赖和危险结构检测的信息，例如必要的读写集合、提交顺序和依赖关系，应保留到不再有相关并发事务需要使用时再清理。
+[P1020] 测试示例
+[P1021] 下面给出若干参考示例帮助理解本题的判分方式。示例中的 SQL 按逻辑划分为 T1、T2、T3 三个事务，实际测试中可能由多个会话交错执行。
+[P1022] 示例一：基本并发样例，同一记录上的写写冲突
+[P1023] 该样例用于验证对同一条记录的并发写冲突处理。该样例在 SI 和 SER 下结果一致。
+[P1024] 初始化 SQL：
+[P1025] create table account (id int, balance int);insert into account values (1, 100);
+[P1026] 事务 1：
+[P1027] t1s set transaction isolation level <LEVEL>;t1a begin;t1b update account set balance = 120 where id = 1;t1c commit;
+[P1028] 事务 2：
+[P1029] t2s set transaction isolation level <LEVEL>;t2a begin;t2b update account set balance = 90 where id = 1;t2c commit;
+[P1030] 事务 3：
+[P1031] t3a select * from account where id = 1;
+[P1032] 调度顺序如下：
+[P1033] 期望标准输出：
+[P1034] abort+------------------+------------------+|               id |          balance |+------------------+------------------+|                1 |              120 |+------------------+------------------+Total record(s): 1
+[P1035] 样例说明：
+[P1037] T2 不能在 T1 未结束时成功覆盖 T1 对同一记录的更新。
+[P1040] T2 应在冲突写语句 t2b 返回 abort，并回滚事务 2。
+[P1043] 若 T2 已经在 t2b 被回滚，则后续 t2c 不应使事务 2 的写入生效。
+[P1046] T3 的查询结果应为 (1, 120)。
+[P1048] 示例二：事务级快照的一致性
+[P1049] 该样例用于验证事务级快照语义。在 SI 与 SER 下，事务读取的都是其开始时的 MVCC 快照，再叠加本事务自身写入。
+[P1050] 初始化 SQL：
+[P1051] create table counter_test (id int, val int);insert into counter_test values (1, 100);
+[P1052] 事务 1：
+[P1053] t1s set transaction isolation level <LEVEL>;t1a begin;t1b select * from counter_test where id = 1;t1c select * from counter_test where id = 1;t1d commit;
+[P1054] 事务 2：
+[P1055] t2a begin;t2b update counter_test set val = 200 where id = 1;t2c commit;
+[P1056] 调度顺序如下：
+[P1057] 当 <LEVEL> = SNAPSHOT ISOLATION 时，期望标准输出为：
+[P1058] +------------------+------------------+|               id |              val |+------------------+------------------+|                1 |              100 |+------------------+------------------+Total record(s): 1+------------------+------------------+|               id |              val |+------------------+------------------+|                1 |              100 |+------------------+------------------+Total record(s): 1
+[P1059] 样例说明：
+[P1061] 两种隔离级别都不允许脏读。
+[P1064] 在同一事务中，即使并发事务已经提交新的写入结果，T1 的第二次查询仍应保持与第一次查询一致。
+[P1067] 该样例主要验证 SI 必须满足事务级快照的一致性。
+[P1069] 示例三：写偏序场景
+[P1070] 写偏序是用于区分 SNAPSHOT ISOLATION 与 SERIALIZABLE 隔离级别的关键场景之一。
+[P1071] 场景描述：
+[P1072] 表 duty 记录两位值班医生是否在岗，约束为“任意时刻至少有一位医生在岗”。初始时两位医生都在岗。两个事务分别读取“另一位医生仍在岗”的事实后，都将自己改为离岗。该调度会形成相反方向的读写反依赖，是典型写偏序异常。
+[P1073] 初始化 SQL：
+[P1074] create table duty (doctor_id int, on_call int);insert into duty values (1, 1);insert into duty values (2, 1);
+[P1075] 事务 1：
+[P1076] t1s set transaction isolation level <LEVEL>;t1a begin;t1b select * from duty where doctor_id = 2;t1c update duty set on_call = 0 where doctor_id = 1;t1d commit;
+[P1077] 事务 2：
+[P1078] t2s set transaction isolation level <LEVEL>;t2a begin;t2b select * from duty where doctor_id = 1;t2c update duty set on_call = 0 where doctor_id = 2;t2d commit;
+[P1079] 事务 3：
+[P1080] t3a select * from duty;
+[P1081] 调度顺序如下：
+[P1082] 当 <LEVEL> = SNAPSHOT ISOLATION 时，期望标准输出为：
+[P1083] +------------------+------------------+|        doctor_id |          on_call |+------------------+------------------+|                2 |                1 |+------------------+------------------+Total record(s): 1+------------------+------------------+|        doctor_id |          on_call |+------------------+------------------+|                1 |                1 |+------------------+------------------+Total record(s): 1+------------------+------------------+|        doctor_id |          on_call |+------------------+------------------+|                1 |                0 ||                2 |                0 |+------------------+------------------+Total record(s): 2
+[P1084] 此时 T1 和 T2 均可成功提交。T1 与 T2 读取的是各自事务开始时的快照，因此都能看到“另一位医生仍在岗”；由于两个事务更新的是不同记录，不发生同一记录上的写写冲突，最终可能出现两人都离岗的写偏序结果。
+[P1085] 当 <LEVEL> = SERIALIZABLE 时，期望标准输出为：
+[P1086] +------------------+------------------+|        doctor_id |          on_call |+------------------+------------------+|                2 |                1 |+------------------+------------------+Total record(s): 1+------------------+------------------+|        doctor_id |          on_call |+------------------+------------------+|                1 |                1 |+------------------+------------------+Total record(s): 1abort+------------------+------------------+|        doctor_id |          on_call |+------------------+------------------+|                1 |                0 ||                2 |                1 |+------------------+------------------+Total record(s): 2
+[P1087] 在 SER 下，t1c 先建立 T2 ->rw T1，尚未形成危险结构；t2c 再建立 T1 ->rw T2，此时形成 SSI 危险结构。根据本题固定的当前语句回滚规则，t2c 需要返回 abort，T2 被回滚，最终只有 T1 的更新生效。
+[P1088] 测试点说明
+[P1089] 测试点包括但不限于以下内容：
+[P1090] 测试输出要求
+[P1092] 对于写写冲突，冲突写语句需要向客户端返回 abort\n，并回滚执行该写语句的事务。
+[P1095] 对于 SSI 危险结构，新增 rw 反依赖并导致危险结构成立的当前语句需要向客户端返回 abort\n，并回滚当前语句所在事务；当前语句可以是 SELECT、INSERT、UPDATE 或 DELETE。
+[P1098] 除 select 的标准输出以及必要的事务回滚信息之外，不应向客户端返回多余信息。
+[P1101] 服务端的输出仍应写入对应数据库目录下的 output.txt 文件中。
+[P1103] 10. 2026题目十：基于静态检查点的故障恢复
+[P1104] 前置题目：可配置的快照与可串行化隔离级别
+[P1105] 题目种类：基础功能
+[P1106] 推荐知识点：故障恢复概述、基于REDO/UNDO日志的恢复算法、恢复算法ARIES
+[P1107] 代码框架：https://gitlab.eduxiji.net/csc1/csc-db/db2026/-/tree/main/rmdb
+[P1109] 题目描述：
+[P1110] 本题目要求实现基于静态检查点的系统故障恢复。包含以下功能：
+[P1111] 1. 日志管理器
+[P1112] 2. WAL机制
+[P1113] 3. 基础故障恢复
+[P1114] 4. 语法功能：create static_checkpoint;命令创建静态检查点
+[P1115] 5. 基于静态检查点的系统故障恢复
+[P1117] 基础故障恢复功能需要实现日志管理器，在系统运行过程中把写操作的日志通过日志缓冲区写入磁盘中，参赛队伍需要实现WAL机制（Wirte-Ahead Log，即先写日志后写数据）和REDO/UNDO日志。在系统发生故障并重启之后，系统可以通过REDO/UNDO日志对系统进行故障恢复，让数据库系统恢复到一致性状态，基础故障恢复在系统重启恢复时从磁盘中的第一条日志开始扫描。
+[P1119] 基于检查点的故障恢复是在基础故障恢复的一个优化，在创建检查点之后，系统故障恢复时从最新的一个检查点开始扫描日志。
+[P1121] 具体的说，检查点技术是将数据库中的脏数据（即缓冲区中已经被修改但还没有写入磁盘的数据）写入磁盘，同时更新数据库的控制文件和日志文件，以便在数据库恢复时能够正确地恢复数据。检查点有多种实现方法，在本题目中，要求参赛队伍实现静态检查点。创建静态检查点时，系统需要停止接收新事务、停止正在运行的事务，并将当前数据库缓冲区中的脏页和日志刷入磁盘。当系统崩溃重启后，能够找到最近的检查点，并从该检查点开始将数据库恢复到一致性状态。
+[P1123] 创建静态检查点的具体步骤如下：
+[P1124] （1）停止接收新事务和正在运行事务
+[P1125] （2）将仍保留在日志缓冲区中的内容写到日志文件中；
+[P1126] （3）在日志文件中写入一个“检查点记录”；
+[P1127] （4）将当前数据库缓冲区中的内容写到数据库中；
+[P1128] （5）把日志文件中检查点记录的地址写到“重新启动文件”中。
+[P1130] 使用静态检查点做故障恢复的步骤如下：
+[P1131] （1）在重新开始文件中找到最后一个检查点在日志文件中的地址。将创建检查点时刻的所有事务加入undo list，而redo list暂时为空
+[P1132] （2）从检查点开始扫描各个日志，如果有新开始的事务则加入undo list，如果有事务提交，则从undo list删除，并加入redo list
+[P1133] （3）对于undo list中的所有事务做undo操作，对于redo list中的事务做redo操作
+[P1134] 关于静态检查点的详细内容可以参考教材《数据库管理系统原理与实现》第12章故障恢复
+[P1136] 测试示例：
+[P1137] 不带检查点的系统故障恢复：
+[P1138] create table t1 (id int, num int);
+[P1139] begin;
+[P1140] insert into t1 values(1, 1);
+[P1141] commit;
+[P1142] begin;
+[P1143] insert into t1 values(2, 2);
+[P1144] crash // 系统接收到终止信号
+[P1145] ...
+[P1146] 重启系统
+[P1147] select * from t1;
+[P1149] 带检查点的系统故障恢复：
+[P1150] create table t1 (id int, num int);
+[P1151] begin;
+[P1152] insert into t1 values(1, 1);
+[P1153] commit;
+[P1154] create static_checkpoint; // 创建静态检查点
+[P1155] begin;
+[P1156] insert into t1 values(2, 2);
+[P1157] crash // 系统接收到终止信号
+[P1158] ...
+[P1159] 重启系统
+[P1160] select * from t1;
+[P1162] 测试点说明：
+[P1164] 测试过程说明：
+[P1165] 2.1 创建表，并插入一定量的数据
+[P1166] create table warehouse (w_id int, w_name char(10), w_street_1 char(20),w_street_2 char(20), w_city char(20), w_state char(2),
+[P1167]  w_zip char(9), w_tax float, w_ytd float);
+[P1168] create table district (d_id int, d_w_id int, d_name char(10), d_street_1 char(20), d_street_2 char(20),
+[P1169]  d_city char(20), d_state char(2), d_zip char(9),d_tax float, d_ytd float, d_next_o_id int);
+[P1170] create table customer (c_id int, c_d_id int, c_w_id int, c_first char(16),c_middle char(2),
+[P1171]  c_last char(16), c_street_1 char(20), c_street_2 char(20),c_city char(20), c_state char(2), 
+[P1172]  c_zip char(9), c_phone char(16), c_since char(30), c_credit char(2), 
+[P1173]  c_credit_lim int, c_discount float, c_balance float,c_ytd_payment float, 
+[P1174]  c_payment_cnt int, c_delivery_cnt int, c_data char(50));
+[P1175] create table history (h_c_id int, h_c_d_id int, h_c_w_id int, h_d_id int,
+[P1176]  h_w_id int, h_date char(19), h_amount float, h_data char(24));
+[P1177] create table new_orders (no_o_id int, no_d_id int, no_w_id int);
+[P1178] create table orders (o_id int, o_d_id int, o_w_id int, o_c_id int, o_entry_d char(19),
+[P1179]  o_carrier_id int, o_ol_cnt int, o_all_local int);
+[P1180] create table order_line ( ol_o_id int, ol_d_id int, ol_w_id int, ol_number int,
+[P1181] ol_i_id int, ol_supply_w_id int, ol_delivery_d char(30), ol_quantity int, ol_amount float, ol_dist_info char(24));
+[P1182] create table item (i_id int, i_im_id int, i_name char(24), i_price float, i_data char(50));
+[P1183] create table stock (s_i_id int, s_w_id int, s_quantity int, s_dist_01 char(24),s_dist_02 char(24),
+[P1184]  s_dist_03 char(24), s_dist_04 char(24), s_dist_05 char(24),s_dist_06 char(24), s_dist_07 char(24),
+[P1185]  s_dist_08 char(24), s_dist_09 char(24),s_dist_10 char(24), s_ytd float, s_order_cnt int, s_remote_cnt int, s_data char(50));
+[P1186] insert ...
+[P1187] insert ...
+[P1188] insert ...
+[P1189] 2.2 执行事务
+[P1190] begin;
+[P1191] select c_discount, c_last, c_credit, w_tax from customer, warehouse where w_id=1 and c_w_id=w_id and c_d_id=1 and c_id=2;
+[P1192] select d_next_o_id, d_tax from district where d_id=1 and d_w_id=1;
+[P1193] update district set d_next_o_id=5 where d_id=1 and d_w_id=1;
+[P1194] insert into orders values (4, 1, 1, 2, '2023-06-03 19:25:47', 26, 5, 1);
+[P1195] insert into new_orders values (4, 1, 1);
+[P1196] select i_price, i_name, i_data from item where i_id=10;
+[P1197] select s_quantity, s_data, s_dist_01, s_dist_02, s_dist_03, s_dist_04, s_dist_05,s_dist_06, s_dist_07, s_dist_08, s_dist_09, s_dist_10 from stock where s_i_id=10 and s_w_id=1;
+[P1198] update stock set s_quantity=7 where s_i_id=10 and s_w_id=1;
+[P1199] insert into order_line values (4, 1, 1, 1, 10, 1, '2023-06-03 19:25:47', 7,286.625000, 'VF2uQHlDhtxa5dKhPwWyCqgY');
+[P1200] select i_price, i_name, i_data from item where i_id=10;
+[P1201] 测试点6会随机创建checkpoint
+[P1202] create static_checkpoint
+[P1203] 2.3 发生 crash
+[P1204] crash
+[P1205] 2.4 重启server
+[P1206] ./bin/rmdb checkpoint_test
+[P1207] 2.5 由另外一个线程一直尝试重连，统计恢复时间（仅最后两个测试点需要）
+[P1209] std::string query = "select * from district;";
+[P1210] time_t start_time = now();
+[P1211] while(true) {
+[P1212]     ret = connect_database("rmdb"); // 尝试重连
+[P1213]     if(ret == 0) {
+[P1214]         if(run_query(query)) { // 如果重连成功并且执行事务成功，视为系统已经恢复完成
+[P1215]         break;
+[P1216]     }
+[P1217]     sleep(0.05); // 否则等待0.05s之后再次尝试
+[P1218] }
+[P1219] time_t end_time = now()
+[P1220] time_t recovery_time = end_time - start_time // 统计恢复时间
+[P1221] 2.6 一致性检测（详见一致性检测文档），前五个测试点通过一致性测试即可拿到分数，最后一个测试点除了通过一致性测试之外，还需要故障恢复时间t2小于测试点5的故障恢复时间t1的70%
+
+=== TABLE 0 ===
+  ROW0: 节点类型 | 格式 | 备注
+  ROW1: Scan节点 | Scan(table=表名, type=SeqScan, rows=行数) | 即叶节点。本题只要求顺序扫描，type 固定为 SeqScan。
+  ROW2: Filter节点 | Filter(condition=[条件1,条件2,...], rows=行数) | 1.确保谓词的左值是表的列，多个条件按字典序排序。
+2.条件中的列名必须包含表名前缀（多表查询时）。
+  ROW3: Project节点 | Project(columns=[表名1.列名1,表名2.列名2,...], rows=行数) | 1.列名按字母顺序排序。
+2.多表查询时使用表名前缀。
+3.需要保留全部的列则输出 Project(columns=[*], rows=行数)。
+4.对于 select 语句根节点一定是 Project 节点。
+  ROW4: Join节点 | Join(tables=[表名1,表名2,...], condition=[条件1,条件2,...], rows=行数) | 1.表名按字母顺序排序，表名为此节点下所有表的集合。
+2.连接条件按字典序排序。
+
+=== TABLE 1 ===
+  ROW0: 测试类型 | 场景
+  ROW1: 单表查询 | 单表选择运算下推与运行时统计
+  ROW2: 两表连接查询 | 两表连接中的选择运算下推
+  ROW3: 投影优化查询 | 两表连接中的投影运算下推
+  ROW4: 多表连接查询 | 多表连接顺序优化，并支持选择运算下推和投影下推
+
+=== TABLE 2 ===
+  ROW0: 节点类型 | 格式 | 备注
+  ROW1: Scan 节点 | Scan(table=表名, type=SeqScan, rows=行数) 或 Scan(table=表名, type=IndexScan, using_index=(列名), rows=行数) | 叶节点。必须指明 type；使用索引时必须指明索引列 using_index=(列名)。
+  ROW2: Project 节点 | Project(columns=[表名1.列名1,表名2.列名2,...], rows=行数) | SELECT 语句根节点一定是 Project 节点；此节点的列名输出时采用 表名.列名 形式，输出顺序为 表名.列名 按字典序排序，当需要保留全部列时输出 Project(columns=[*], rows=行数)。
+  ROW3: Join 节点 | Join(tables=[表名1,表名2,...], condition=[条件1,条件2,...], rows=行数) | 表名为该节点下所有表的集合，并按字母顺序排序；连接条件属于 Join 节点，多个连接条件按字典序排序。
+
+=== TABLE 3 ===
+  ROW0: 测试点 | 场景 | 分值
+  ROW1: test1 | 两表基础全匹配 | 20%
+  ROW2: test2 | 两表部分匹配 | 20%
+  ROW3: test3 | 两表完全不匹配 | 20%
+  ROW4: test4 | 两表大数据部分匹配，并比较 INLJ 与 NLJ 的性能差异 | 20%
+  ROW5: test5 | 五表等值连接 | 20%
+
+=== TABLE 4 ===
+  ROW0: 步骤 | T1 | T2 | T3
+  ROW1: 1 | t1s set transaction isolation level <LEVEL>; |  | 
+  ROW2: 2 |  | t2s set transaction isolation level <LEVEL>; | 
+  ROW3: 3 | t1a begin; |  | 
+  ROW4: 4 | t1b update account set balance = 120 where id = 1; |  | 
+  ROW5: 5 |  | t2a begin; | 
+  ROW6: 6 |  | t2b update account set balance = 90 where id = 1; | 
+  ROW7: 7 | t1c commit; |  | 
+  ROW8: 8 |  | t2c commit; | 
+  ROW9: 9 |  |  | t3a select * from account where id = 1;
+
+=== TABLE 5 ===
+  ROW0: 步骤 | T1 | T2
+  ROW1: 1 | t1s set transaction isolation level <LEVEL>; | 
+  ROW2: 2 | t1a begin; | 
+  ROW3: 3 | t1b select * from counter_test where id = 1; | 
+  ROW4: 4 |  | t2a begin;
+  ROW5: 5 |  | t2b update counter_test set val = 200 where id = 1;
+  ROW6: 6 |  | t2c commit;
+  ROW7: 7 | t1c select * from counter_test where id = 1; | 
+  ROW8: 8 | t1d commit; | 
+
+=== TABLE 6 ===
+  ROW0: 步骤 | T1 | T2 | T3
+  ROW1: 1 | t1s set transaction isolation level <LEVEL>; |  | 
+  ROW2: 2 |  | t2s set transaction isolation level <LEVEL>; | 
+  ROW3: 3 | t1a begin; |  | 
+  ROW4: 4 |  | t2a begin; | 
+  ROW5: 5 | t1b select * from duty where doctor_id = 2; |  | 
+  ROW6: 6 |  | t2b select * from duty where doctor_id = 1; | 
+  ROW7: 7 | t1c update duty set on_call = 0 where doctor_id = 1; |  | 
+  ROW8: 8 |  | t2c update duty set on_call = 0 where doctor_id = 2; | 
+  ROW9: 9 | t1d commit; |  | 
+  ROW10: 10 |  | t2d commit; | 
+  ROW11: 11 |  |  | t3a select * from duty;
+
+=== TABLE 7 ===
+  ROW0: 测试点 | 详细说明
+  ROW1: si/InsertTest | 在 SI 下验证插入记录的事务内可见性、并发事务快照可见性以及提交后的最终查询结果
+  ROW2: si/DirtyReadTest | 在 SI 下验证未提交更新不会被其他事务读到，同时事务能够读到自己的未提交写入
+  ROW3: si/ReadWriteConflictDeleteTest | 在 SI 下验证读后并发删除、再删除同一记录时的快照可见性和删除冲突处理
+  ROW4: si/WriteWriteConflictUpdateTest | 在 SI 下验证两个事务并发更新同一记录时的写写冲突处理，最终只能保留一个有效写入结果
+  ROW5: ser/UnrepeatableReadTest | 在 SER 下验证重复读取同一记录时的快照读结果和 SSI 依赖判断
+  ROW6: ser/PhantomReadTest | 在 SER 下验证范围读、空结果读与并发写入之间的谓词读依赖判断
+  ROW7: ser/WriteSkewTest | 在 SER 下执行写偏序调度，验证系统能够回滚导致 SSI 危险结构成立的事务并维持全局约束
+
+=== TABLE 8 ===
+  ROW0: 测试点 | 详细说明
+  ROW1: crash_recovery_single_thread_test | 单线程发送事务，数据量较小，不包括建立检查点
+  ROW2: crash_recovery_multi_thread_test | 多线程发送事务，数据量较小，不包括建立检查点
+  ROW3: crash_recovery_index_test | 单线程发送事务，包含建立索引，数据量较大，不包括建立检查点
+  ROW4: crash_recovery_large_data_test | 多线程发送事务，数据量较大，不包括建立检查点
+  ROW5: crash_recovery_without_checkpoint | 单线程发送事务，数据量巨大，不包括建立检查点，会记录系统故障恢复时间t1（注：恢复时间指从server重启开始，到server能够提供服务为止所需的时间）
+  ROW6: crash_recovery_with_checkpoint | 单线程发送事务，数据量同crash_recovery_without_checkpoint测试，在执行过程中，会不定时发送create static_checkpoint建立检查点，在系统crash之后会记录系统恢复时间t2，其中t2不超过t1的70%并且通过本题目的一致性检测，可认为通过本测试点
