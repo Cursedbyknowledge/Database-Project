@@ -119,9 +119,49 @@ std::shared_ptr<Plan> pop_scan(int *scantbl, std::string table, std::vector<std:
 
 std::shared_ptr<Query> Planner::logical_optimization(std::shared_ptr<Query> query, Context *context)
 {
-    
-    //TODO 实现逻辑优化规则
-
+    // 逻辑优化：谓词规范化与去重
+    if (!query->conds.empty()) {
+        // 1. 移除重复条件
+        std::vector<Condition> deduped;
+        for (auto &cond : query->conds) {
+            bool is_dup = false;
+            for (auto &existing : deduped) {
+                if (cond.lhs_col.tab_name == existing.lhs_col.tab_name &&
+                    cond.lhs_col.col_name == existing.lhs_col.col_name &&
+                    cond.op == existing.op &&
+                    cond.is_rhs_val == existing.is_rhs_val) {
+                    if (cond.is_rhs_val) {
+                        if (cond.rhs_val.type == existing.rhs_val.type &&
+                            memcmp(cond.rhs_val.raw->data, existing.rhs_val.raw->data, existing.rhs_val.raw->size) == 0) {
+                            is_dup = true;
+                            break;
+                        }
+                    } else {
+                        if (cond.rhs_col.tab_name == existing.rhs_col.tab_name &&
+                            cond.rhs_col.col_name == existing.rhs_col.col_name) {
+                            is_dup = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!is_dup) {
+                deduped.push_back(cond);
+            }
+        }
+        // 2. 将单表+常量条件排到前面（便于 make_one_rel 的 pop_conds 优先处理）
+        std::vector<Condition> single_tab, join_conds;
+        for (auto &cond : deduped) {
+            if (cond.is_rhs_val) {
+                single_tab.push_back(cond);
+            } else {
+                join_conds.push_back(cond);
+            }
+        }
+        query->conds.clear();
+        query->conds.insert(query->conds.end(), single_tab.begin(), single_tab.end());
+        query->conds.insert(query->conds.end(), join_conds.begin(), join_conds.end());
+    }
     return query;
 }
 

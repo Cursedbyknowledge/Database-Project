@@ -22,7 +22,12 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
     {
         // 处理表名
         query->tables = std::move(x->tabs);
-        /** TODO: 检查表是否存在 */
+        // 检查表是否存在
+        for (auto &tab_name : query->tables) {
+            if (!sm_manager_->db_.is_table(tab_name)) {
+                throw TableNotFoundError(tab_name);
+            }
+        }
 
         // 处理target list，再target list中添加上表名，例如 a.id
         for (auto &sv_sel_col : x->cols) {
@@ -48,7 +53,24 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
         get_clause(x->conds, query->conds);
         check_clause(query->tables, query->conds);
     } else if (auto x = std::dynamic_pointer_cast<ast::UpdateStmt>(parse)) {
-        /** TODO: */
+        // 检查表是否存在
+        if (!sm_manager_->db_.is_table(x->tab_name)) {
+            throw TableNotFoundError(x->tab_name);
+        }
+        query->tables = {x->tab_name};
+        // 检查 set_clauses 中的列是否存在，并存储到 query 中
+        auto &tab = sm_manager_->db_.get_table(x->tab_name);
+        for (auto &sv_clause : x->set_clauses) {
+            // 检查列是否存在
+            tab.get_col(sv_clause->col_name);
+            SetClause clause;
+            clause.lhs = {.tab_name = x->tab_name, .col_name = sv_clause->col_name};
+            clause.rhs = convert_sv_value(sv_clause->val);
+            query->set_clauses.push_back(clause);
+        }
+        // 处理 WHERE 条件
+        get_clause(x->conds, query->conds);
+        check_clause({x->tab_name}, query->conds);
 
     } else if (auto x = std::dynamic_pointer_cast<ast::DeleteStmt>(parse)) {
         //处理where条件
@@ -84,7 +106,9 @@ TabCol Analyze::check_column(const std::vector<ColMeta> &all_cols, TabCol target
         }
         target.tab_name = tab_name;
     } else {
-        /** TODO: Make sure target column exists */
+        // 检查指定表中是否存在该列
+        auto &tab = sm_manager_->db_.get_table(target.tab_name);
+        tab.get_col(target.col_name);
         
     }
     return target;

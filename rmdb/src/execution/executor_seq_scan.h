@@ -15,18 +15,19 @@ See the Mulan PSL v2 for more details. */
 #include "executor_abstract.h"
 #include "index/ix.h"
 #include "system/sm.h"
+#include "execution_common.h"
 
 class SeqScanExecutor : public AbstractExecutor {
    private:
-    std::string tab_name_;              // 表的名称
-    std::vector<Condition> conds_;      // scan的条件
-    RmFileHandle *fh_;                  // 表的数据文件句柄
-    std::vector<ColMeta> cols_;         // scan后生成的记录的字段
-    size_t len_;                        // scan后生成的每条记录的长度
-    std::vector<Condition> fed_conds_;  // 同conds_，两个字段相同
+    std::string tab_name_;
+    std::vector<Condition> conds_;
+    RmFileHandle *fh_;
+    std::vector<ColMeta> cols_;
+    size_t len_;
+    std::vector<Condition> fed_conds_;
 
     Rid rid_;
-    std::unique_ptr<RecScan> scan_;     // table_iterator
+    std::unique_ptr<RecScan> scan_;
 
     SmManager *sm_manager_;
 
@@ -39,23 +40,32 @@ class SeqScanExecutor : public AbstractExecutor {
         fh_ = sm_manager_->fhs_.at(tab_name_).get();
         cols_ = tab.cols;
         len_ = cols_.back().offset + cols_.back().len;
-
         context_ = context;
-
         fed_conds_ = conds_;
     }
 
     void beginTuple() override {
-        
+        scan_ = std::make_unique<RmScan>(fh_);
     }
 
     void nextTuple() override {
-        
+        scan_->next();
     }
 
     std::unique_ptr<RmRecord> Next() override {
-        return nullptr;
+        if (scan_->is_end()) return nullptr;
+        rid_ = scan_->rid();
+        auto rec = fh_->get_record(rid_, context_);
+        if (rec == nullptr) return nullptr;
+        for (auto& cond : fed_conds_) {
+            if (!eval_cond(rec->data, cond, cols_)) {
+                return nullptr;
+            }
+        }
+        return rec;
     }
+
+    bool is_end() const override { return scan_ ? scan_->is_end() : true; }
 
     Rid &rid() override { return rid_; }
 };

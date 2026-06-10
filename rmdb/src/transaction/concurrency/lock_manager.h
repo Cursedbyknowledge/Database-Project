@@ -17,11 +17,14 @@ See the Mulan PSL v2 for more details. */
 static const std::string GroupLockModeStr[10] = {"NON_LOCK", "IS", "IX", "S", "X", "SIX"};
 
 class LockManager {
+   public:
     /* 加锁类型，包括共享锁、排他锁、意向共享锁、意向排他锁、SIX（意向排他锁+共享锁） */
     enum class LockMode { SHARED, EXLUCSIVE, INTENTION_SHARED, INTENTION_EXCLUSIVE, S_IX };
 
     /* 用于标识加锁队列中排他性最强的锁类型，例如加锁队列中有SHARED和EXLUSIVE两个加锁操作，则该队列的锁模式为X */
     enum class GroupLockMode { NON_LOCK, IS, IX, S, X, SIX};
+
+   private:
 
     /* 事务的加锁申请 */
     class LockRequest {
@@ -61,7 +64,15 @@ public:
 
     bool unlock(Transaction* txn, LockDataId lock_data_id);
 
-private:
+   private:
+    // 辅助函数：检查锁模式兼容性
+    static bool is_compatible(LockMode request, GroupLockMode granted);
+    // 重新计算队列的 GroupLockMode
+    static GroupLockMode compute_group_mode(const std::list<LockRequest>& requests);
+    // 检查事务是否已持有更强或相同锁
+    static bool already_holds_lock(const std::list<LockRequest>& requests, txn_id_t txn_id, LockMode request_mode);
+    // 通用锁申请
+    bool acquire_lock(Transaction* txn, const LockDataId& lock_data_id, LockMode lock_mode);
     std::mutex latch_;      // 用于锁表的并发
     std::unordered_map<LockDataId, LockRequestQueue> lock_table_;   // 全局锁表
 };
