@@ -12,7 +12,7 @@
 
 %{
 #include "ast.h"
-#include "yacc.tab.h"
+#include "yacc.tab.hpp"
 #include <iostream>
 
 // automatically update location

@@ -114,7 +114,10 @@ void IxNodeHandle::insert_pairs(int pos, const char *key, const Rid *rid, int n)
  */
 int IxNodeHandle::insert(const char *key, const Rid &value) {
     int pos = lower_bound(key);
-    // 允许重复键: 即使key相等也插入, 重复键按插入顺序排列
+    if (pos < page_hdr->num_key &&
+        ix_compare(get_key(pos), key, file_hdr->col_types_, file_hdr->col_lens_) == 0) {
+        return page_hdr->num_key;
+    }
     insert_pair(pos, key, value);
     return page_hdr->num_key;
 }
