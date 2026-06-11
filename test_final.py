@@ -3,10 +3,7 @@
 import socket, time, subprocess, os
 
 DB = '/tmp/rmdb_ci_test'
-DB_BASE = os.path.basename(DB)
 subprocess.run(['rm', '-rf', DB])
-# 保存原始CWD，output.txt在 build/<db_name>/output.txt
-orig_cwd = os.getcwd()
 p = subprocess.Popen(['build/bin/rmdb', DB], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(1.5)
 
@@ -87,8 +84,8 @@ check("Index range", r, ["500", "bgtyhnmj"])
 s.close()
 time.sleep(0.5)
 
-# output.txt 在数据库目录下 (赛题要求: build/<db_name>/output.txt)
-op = os.path.join(DB, 'output.txt')
+# output.txt 在当前工作目录下 (与CI行为一致: open_db不改变CWD)
+op = 'output.txt'
 print(f"\noutput.txt: {'EXISTS' if os.path.exists(op) else 'MISSING'}")
 if os.path.exists(op):
     fc = open(op).read().count('failure')

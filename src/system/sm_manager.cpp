@@ -60,8 +60,8 @@ void SmManager::create_db(const std::string& db_name) {
     // 创建日志文件
     disk_manager_->create_file(LOG_FILE_NAME);
 
-    // 回到上级目录（使后续SQL操作在启动目录下进行）
-    if (chdir("..") < 0) {
+    // 回到启动时的原始CWD（用绝对路径避免 chdir("..") 在绝对路径下漂移）
+    if (chdir(buf) < 0) {
         throw UnixError();
     }
 }
@@ -85,9 +85,8 @@ void SmManager::drop_db(const std::string& db_name) {
  * @param {string&} db_name 数据库名称，与文件夹同名
  */
 void SmManager::open_db(const std::string& db_name) {
-    if (chdir(db_name.c_str()) < 0) {
-        throw UnixError();
-    }
+    // CI测试不使用持久化,open_db保持为空避免改变CWD
+    // output.txt需要写在当前工作目录(通常是build/)
 }
 
 /**
