@@ -67,31 +67,25 @@ class IndexScanExecutor : public AbstractExecutor {
     }
 
     void nextTuple() override {
-        scan_->next();
+        if (!scan_->is_end()) scan_->next();
     }
 
     std::unique_ptr<RmRecord> Next() override {
-        while (!scan_->is_end()) {
-            rid_ = scan_->rid();
-            try {
-                auto rec = fh_->get_record(rid_, context_);
-                if (rec != nullptr) {
-                    // 检查是否满足过滤条件
-                    bool match = true;
-                    for (auto& cond : fed_conds_) {
-                        if (!eval_cond(rec->data, cond, cols_)) {
-                            match = false;
-                            break;
-                        }
-                    }
-                    if (match) {
-                        return rec;
+        if (scan_->is_end()) return nullptr;
+        rid_ = scan_->rid();
+        try {
+            auto rec = fh_->get_record(rid_, context_);
+            if (rec != nullptr) {
+                // 检查是否满足过滤条件
+                for (auto& cond : fed_conds_) {
+                    if (!eval_cond(rec->data, cond, cols_)) {
+                        return nullptr;
                     }
                 }
-            } catch (RecordNotFoundError &e) {
-                // 记录已被删除，跳过该索引条目
+                return rec;
             }
-            scan_->next();
+        } catch (RecordNotFoundError &e) {
+            // 记录已被删除，跳过该索引条目，外层循环会推进
         }
         return nullptr;
     }
