@@ -81,18 +81,7 @@ void SmManager::drop_db(const std::string& db_name) {
  * @param {string&} db_name 数据库名称，与文件夹同名
  */
 void SmManager::open_db(const std::string& db_name) {
-    if (!is_dir(db_name)) {
-        throw DatabaseNotFoundError(db_name);
-    }
-    if (chdir(db_name.c_str()) < 0) {
-        throw UnixError();
-    }
-    // 加载数据库元数据
-    std::ifstream ifs(DB_META_NAME);
-    if (ifs.is_open()) {
-        ifs >> db_;
-        ifs.close();
-    }
+    
 }
 
 /**
