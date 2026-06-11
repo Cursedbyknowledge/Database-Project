@@ -90,6 +90,11 @@ void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Co
                 sm_manager_->show_tables(context);
                 break;
             }
+            case T_ShowIndex:
+            {
+                sm_manager_->show_index(x->tab_name_, context);
+                break;
+            }
             case T_DescTable:
             {
                 sm_manager_->desc_table(x->tab_name_, context);
@@ -146,6 +151,8 @@ void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Co
 // 执行select语句，select语句的输出除了需要返回客户端外，还需要写入output.txt文件中
 void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, std::vector<TabCol> sel_cols, 
                             Context *context) {
+    std::cerr << "DEBUG select_from: starting" << std::endl;
+
     std::vector<std::string> captions;
     captions.reserve(sel_cols.size());
     for (auto &sel_col : sel_cols) {
@@ -169,8 +176,10 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     // Print records
     size_t num_rec = 0;
     // 执行query_plan
+    std::cerr << "DEBUG select_from: entering for loop" << std::endl;
     for (executorTreeRoot->beginTuple(); !executorTreeRoot->is_end(); executorTreeRoot->nextTuple()) {
         auto Tuple = executorTreeRoot->Next();
+        if (Tuple == nullptr) continue;
         std::vector<std::string> columns;
         for (auto &col : executorTreeRoot->cols()) {
             std::string col_str;

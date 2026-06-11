@@ -47,6 +47,12 @@ struct Help : public TreeNode {
 struct ShowTables : public TreeNode {
 };
 
+struct ShowIndex : public TreeNode {
+    std::string tab_name;
+
+    ShowIndex(std::string tab_name_) : tab_name(std::move(tab_name_)) {}
+};
+
 struct TxnBegin : public TreeNode {
 };
 
@@ -113,6 +119,15 @@ struct DropIndex : public TreeNode {
             tab_name(std::move(tab_name_)), col_names(std::move(col_names_)) {}
 };
 
+struct CreateStaticCheckpoint : public TreeNode {
+};
+
+struct SetIsolationLevel : public TreeNode {
+    std::string level;
+
+    SetIsolationLevel(std::string level_) : level(std::move(level_)) {}
+};
+
 struct Expr : public TreeNode {
 };
 
@@ -146,6 +161,8 @@ struct BoolLit : public Value {
 struct Col : public Expr {
     std::string tab_name;
     std::string col_name;
+    bool is_agg = false;
+    std::string agg_func;  // COUNT, MAX, MIN, SUM, AVG
 
     Col(std::string tab_name_, std::string col_name_) :
             tab_name(std::move(tab_name_)), col_name(std::move(col_name_)) {}
@@ -220,10 +237,10 @@ struct SelectStmt : public TreeNode {
     std::vector<std::shared_ptr<BinaryExpr>> conds;
     std::vector<std::shared_ptr<JoinExpr>> jointree;
 
-    
     bool has_sort;
     std::shared_ptr<OrderBy> order;
-
+    bool explain_analyze = false;
+    int limit_val = -1;
 
     SelectStmt(std::vector<std::shared_ptr<Col>> cols_,
                std::vector<std::string> tabs_,

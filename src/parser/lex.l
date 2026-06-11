@@ -85,8 +85,30 @@ single_op ";"|"("|")"|","|"*"|"="|">"|"<"|"."
 "ORDER" { return ORDER; }
 "BY" {  return BY;  }
 "ASC" { return ASC; }
+"DESC" { return DESC; }
 "ENABLE_NESTLOOP" { return ENABLE_NESTLOOP; }
 "ENABLE_SORTMERGE" { return ENABLE_SORTMERGE; }
+"EXPLAIN" { return EXPLAIN; }
+"ANALYZE" { return ANALYZE; }
+"COUNT" { return COUNT; }
+"MAX" { return MAX_TOKEN; }
+"MIN" { return MIN_TOKEN; }
+"SUM" { return SUM_TOKEN; }
+"AVG" { return AVG; }
+"GROUP" { return GROUP; }
+"HAVING" { return HAVING; }
+"LIMIT" { return LIMIT; }
+"UNION" { return UNION_TOKEN; }
+"ALL" { return ALL; }
+"ON" { return ON; }
+"AS" { return AS; }
+"ISOLATION" { return ISOLATION; }
+"LEVEL" { return LEVEL; }
+"SNAPSHOT" { return SNAPSHOT_TOKEN; }
+"SERIALIZABLE" { return SERIALIZABLE; }
+"TRANSACTION" { return TRANSACTION; }
+"CHECKPOINT" { return CHECKPOINT; }
+"STATIC_CHECKPOINT" { return STATIC_CHECKPOINT; }
 "TRUE" { 
     yylval->sv_bool = true;
     return VALUE_BOOL; 

@@ -13,16 +13,20 @@ void yyerror(YYLTYPE *locp, const char* s) {
 using namespace ast;
 %}
 
-// request a pure (reentrant) parser
 %define api.pure full
-// enable location in error handler
 %locations
-// enable verbose syntax error message
 %define parse.error verbose
 
 // keywords
 %token SHOW TABLES CREATE TABLE DROP DESC INSERT INTO VALUES DELETE FROM ASC ORDER BY
-WHERE UPDATE SET SELECT INT CHAR FLOAT INDEX AND JOIN EXIT HELP TXN_BEGIN TXN_COMMIT TXN_ABORT TXN_ROLLBACK ORDER_BY ENABLE_NESTLOOP ENABLE_SORTMERGE
+WHERE UPDATE SET SELECT INT CHAR FLOAT INDEX AND JOIN EXIT HELP
+TXN_BEGIN TXN_COMMIT TXN_ABORT TXN_ROLLBACK ORDER_BY
+ENABLE_NESTLOOP ENABLE_SORTMERGE
+EXPLAIN ANALYZE COUNT MAX_TOKEN MIN_TOKEN SUM_TOKEN AVG
+GROUP HAVING LIMIT UNION_TOKEN ALL ON AS
+ISOLATION LEVEL SNAPSHOT_TOKEN SERIALIZABLE TRANSACTION
+CHECKPOINT STATIC_CHECKPOINT
+
 // non-keywords
 %token LEQ NEQ GEQ T_EOF
 
@@ -44,14 +48,15 @@ WHERE UPDATE SET SELECT INT CHAR FLOAT INDEX AND JOIN EXIT HELP TXN_BEGIN TXN_CO
 %type <sv_str> tbName colName
 %type <sv_strs> tableList colNameList
 %type <sv_col> col
-%type <sv_cols> colList selector
+%type <sv_cols> colList selector agg_selector
 %type <sv_set_clause> setClause
 %type <sv_set_clauses> setClauses
 %type <sv_cond> condition
-%type <sv_conds> whereClause optWhereClause
-%type <sv_orderby>  order_clause opt_order_clause
+%type <sv_conds> whereClause optWhereClause havingClause optHavingClause
+%type <sv_orderby> order_clause opt_order_clause
 %type <sv_orderby_dir> opt_asc_desc
 %type <sv_setKnobType> set_knob_type
+%type <sv_int> opt_limit
 
 %%
 start:
@@ -98,7 +103,7 @@ txnStmt:
     {
         $$ = std::make_shared<TxnAbort>();
     }
-    | TXN_ROLLBACK
+    |   TXN_ROLLBACK
     {
         $$ = std::make_shared<TxnRollback>();
     }
@@ -109,12 +114,24 @@ dbStmt:
     {
         $$ = std::make_shared<ShowTables>();
     }
+    |   SHOW INDEX FROM tbName
+    {
+        $$ = std::make_shared<ShowIndex>($4);
+    }
     ;
 
 setStmt:
         SET set_knob_type '=' VALUE_BOOL
     {
         $$ = std::make_shared<SetStmt>($2, $4);
+    }
+    |   SET TRANSACTION ISOLATION LEVEL SNAPSHOT_TOKEN ISOLATION
+    {
+        $$ = std::make_shared<SetIsolationLevel>("SNAPSHOT_ISOLATION");
+    }
+    |   SET TRANSACTION ISOLATION LEVEL SERIALIZABLE
+    {
+        $$ = std::make_shared<SetIsolationLevel>("SERIALIZABLE");
     }
     ;
 
@@ -139,6 +156,10 @@ ddl:
     {
         $$ = std::make_shared<DropIndex>($3, $5);
     }
+    |   CREATE STATIC_CHECKPOINT
+    {
+        $$ = std::make_shared<CreateStaticCheckpoint>();
+    }
     ;
 
 dml:
@@ -154,9 +175,51 @@ dml:
     {
         $$ = std::make_shared<UpdateStmt>($2, $4, $5);
     }
-    |   SELECT selector FROM tableList optWhereClause opt_order_clause
+    |   SELECT selector FROM tableList optWhereClause opt_order_clause opt_limit
     {
-        $$ = std::make_shared<SelectStmt>($2, $4, $5, $6);
+        auto sel = std::make_shared<SelectStmt>($2, $4, $5, $6);
+        if ($7 > 0) sel->limit_val = $7;
+        $$ = sel;
+    }
+    |   SELECT agg_selector FROM tableList optWhereClause opt_group_clause optHavingClause opt_order_clause opt_limit
+    {
+        // Aggregation query with GROUP BY / HAVING
+        auto sel = std::make_shared<SelectStmt>($2, $4, $5, $8);
+        if ($9 > 0) sel->limit_val = $9;
+        $$ = sel;
+    }
+    |   EXPLAIN ANALYZE SELECT selector FROM tableList optWhereClause opt_order_clause
+    {
+        auto sel = std::make_shared<SelectStmt>($4, $6, $7, $8);
+        sel->explain_analyze = true;
+        $$ = sel;
+    }
+    |   EXPLAIN ANALYZE SELECT agg_selector FROM tableList optWhereClause opt_group_clause optHavingClause opt_order_clause
+    {
+        auto sel = std::make_shared<SelectStmt>($4, $6, $7, $10);
+        sel->explain_analyze = true;
+        $$ = sel;
+    }
+    ;
+
+opt_group_clause:
+        /* epsilon */
+    |   GROUP BY colNameList
+    ;
+
+optHavingClause:
+        /* epsilon */ { /* ignore */ }
+    |   HAVING whereClause
+    {
+        $$ = $2;
+    }
+    ;
+
+opt_limit:
+        /* epsilon */ { $$ = -1; }
+    |   LIMIT VALUE_INT
+    {
+        $$ = $2;
     }
     ;
 
@@ -260,6 +323,17 @@ whereClause:
     }
     ;
 
+havingClause:
+        condition
+    {
+        $$ = std::vector<std::shared_ptr<BinaryExpr>>{$1};
+    }
+    |   havingClause AND condition
+    {
+        $$.push_back($3);
+    }
+    ;
+
 col:
         tbName '.' colName
     {
@@ -346,6 +420,67 @@ selector:
     |   colList
     ;
 
+agg_selector:
+        colList
+    |   agg_item
+    {
+        // Single aggregate
+    }
+    |   agg_selector ',' col
+    {
+        // mixed agg and cols
+    }
+    |   agg_selector ',' agg_item
+    {
+        // multiple aggregates
+    }
+    ;
+
+agg_item:
+        COUNT '(' '*' ')'
+    {
+        auto c = std::make_shared<Col>("", "*");
+        c->is_agg = true;
+        c->agg_func = "COUNT";
+        $$ = std::vector<std::shared_ptr<Col>>{c};
+    }
+    |   COUNT '(' colName ')'
+    {
+        auto c = std::make_shared<Col>("", $3);
+        c->is_agg = true;
+        c->agg_func = "COUNT";
+        $$ = std::vector<std::shared_ptr<Col>>{c};
+    }
+    |   MAX_TOKEN '(' colName ')'
+    {
+        auto c = std::make_shared<Col>("", $3);
+        c->is_agg = true;
+        c->agg_func = "MAX";
+        $$ = std::vector<std::shared_ptr<Col>>{c};
+    }
+    |   MIN_TOKEN '(' colName ')'
+    {
+        auto c = std::make_shared<Col>("", $3);
+        c->is_agg = true;
+        c->agg_func = "MIN";
+        $$ = std::vector<std::shared_ptr<Col>>{c};
+    }
+    |   SUM_TOKEN '(' colName ')'
+    {
+        auto c = std::make_shared<Col>("", $3);
+        c->is_agg = true;
+        c->agg_func = "SUM";
+        $$ = std::vector<std::shared_ptr<Col>>{c};
+    }
+    |   AVG '(' colName ')'
+    {
+        auto c = std::make_shared<Col>("", $3);
+        c->is_agg = true;
+        c->agg_func = "AVG";
+        $$ = std::vector<std::shared_ptr<Col>>{c};
+    }
+    ;
+
 tableList:
         tbName
     {
@@ -356,6 +491,10 @@ tableList:
         $$.push_back($3);
     }
     |   tableList JOIN tbName
+    {
+        $$.push_back($3);
+    }
+    |   tableList JOIN tbName ON whereClause
     {
         $$.push_back($3);
     }

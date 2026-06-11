@@ -22,16 +22,30 @@ See the Mulan PSL v2 for more details. */
 #include "index/ix.h"
 #include "record_printer.h"
 
-// 目前的索引匹配规则为：完全匹配索引字段，且全部为单点查询，不会自动调整where条件的顺序
+// 索引匹配规则：最左前缀匹配
+// 匹配所有等值条件以及紧随其后的第一个范围条件
 bool Planner::get_index_cols(std::string tab_name, std::vector<Condition> curr_conds, std::vector<std::string>& index_col_names) {
     index_col_names.clear();
     for(auto& cond: curr_conds) {
-        if(cond.is_rhs_val && cond.op == OP_EQ && cond.lhs_col.tab_name.compare(tab_name) == 0)
-            index_col_names.push_back(cond.lhs_col.col_name);
+        if(cond.is_rhs_val && cond.lhs_col.tab_name.compare(tab_name) == 0) {
+            if (cond.op == OP_EQ) {
+                index_col_names.push_back(cond.lhs_col.col_name);
+            } else {
+                // 第一个范围条件也可以利用索引
+                index_col_names.push_back(cond.lhs_col.col_name);
+                break;  // 范围条件之后的列不能使用索引
+            }
+        }
     }
+    if (index_col_names.empty()) return false;
     TabMeta& tab = sm_manager_->db_.get_table(tab_name);
     if(tab.is_index(index_col_names)) return true;
-    return false;
+    // 如果完全匹配失败，尝试最左前缀（去掉最后一个条件）
+    while (index_col_names.size() > 1) {
+        index_col_names.pop_back();
+        if (tab.is_index(index_col_names)) return true;
+    }
+    return index_col_names.size() >= 1 && tab.is_index(index_col_names);
 }
 
 /**
