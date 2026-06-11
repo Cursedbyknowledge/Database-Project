@@ -37,6 +37,11 @@ void SmManager::create_db(const std::string& db_name) {
     if (is_dir(db_name)) {
         throw DatabaseExistsError(db_name);
     }
+    // 保存启动时的原始CWD，output.txt写在此目录
+    char buf[1024];
+    if (getcwd(buf, sizeof(buf)) != nullptr) {
+        cwd_ = std::string(buf);
+    }
     //为数据库创建一个子目录
     std::string cmd = "mkdir " + db_name;
     if (system(cmd.c_str()) < 0) {
@@ -80,8 +85,9 @@ void SmManager::drop_db(const std::string& db_name) {
  * @param {string&} db_name 数据库名称，与文件夹同名
  */
 void SmManager::open_db(const std::string& db_name) {
-    // CI测试不使用持久化,open_db保持为空避免改变CWD
-    // output.txt需要写在当前工作目录(通常是build/)
+    if (chdir(db_name.c_str()) < 0) {
+        throw UnixError();
+    }
 }
 
 /**
