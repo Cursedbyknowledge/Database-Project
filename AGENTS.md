@@ -424,3 +424,70 @@ gdb ./bin/rmdb core
 - 检查 LockManager 中行级锁的加锁/解锁顺序
 - 确保 `make_txn()` 与 `commit_txn()`/`abort_txn()` 成对调用
 - 确认 WAL 日志在所有写操作之前/之后正确写入
+
+## ⚠️ 开发陷阱与经验教训
+
+### output.txt 位置（最重要的 CI 规范）
+
+**赛题全文第 211/311 行明确要求**：`output.txt` 必须写入**数据库文件夹下**，即 `build/<db_name>/output.txt`。
+
+要实现这一点，`SmManager::open_db()` 必须执行 `chdir(db_name)` 切换到数据库目录。**绝不能**将 `open_db` 留空——虽然某些本地测试可能通过，但 CI 会严格检查 `build/<db_name>/output.txt` 路径。
+
+`output.txt` 写入点涉及多个文件：`sm_manager.cpp`（`show_tables`、`show_index`）、`execution_manager.cpp`（`select_from`）、`rmdb.cpp`（异常处理）。全部使用相对路径 `"output.txt"`，依赖 `open_db` 的 `chdir` 保证正确位置。
+
+### 类型转换：`sizeof(int) == sizeof(float)` 陷阱
+
+在 x86_64 上 `sizeof(int) == sizeof(float) == 4`。这意味着**不能通过缓冲区长度区分 INT 和 FLOAT**。以下模式的代码是**错误的**：
+
+```cpp
+// ❌ 错误：两个分支条件等价，第一个总是匹配
+if (len == sizeof(int)) {
+    *(int*)(raw->data) = int_val;
+} else if (len == sizeof(float)) {
+    *(float*)(raw->data) = (float)int_val;  // 永远不会执行
+}
+```
+
+**正确做法**：在调用 `init_raw()` **之前**，由调用方完成类型转换——直接修改 `Value.type` 和值：
+
+```cpp
+// ✅ 正确：先在调用方转换 Value 类型
+if (col.type == TYPE_FLOAT && val.type == TYPE_INT) {
+    val.set_float((float)val.int_val);  // 类型变为 FLOAT
+}
+val.init_raw(col.len);  // 此时 type 已正确
+```
+
+涉及类型转换的三个位置：
+| 位置 | 文件 | 说明 |
+|------|------|------|
+| WHERE 条件 | `analyze.cpp:check_clause()` | 比较列类型与值类型，INT↔FLOAT 时转换值的类型 |
+| INSERT 值 | `executor_insert.h:Next()` | 列类型与值类型不匹配时，先调 `set_float/set_int` 再调 `init_raw` |
+| UPDATE SET | `analyze.cpp:do_analyze()` | 同上，SET 子句的值类型需与目标列匹配 |
+
+### `assert(false)` 导致服务崩溃
+
+C++ 的 `assert` 在 Debug 模式下触发 `SIGABRT`，直接杀死进程。**永远不要在业务逻辑路径中使用 `assert(false)`**。对于不应到达的代码路径，优先：
+
+1. 提前在调用方做参数校验并 `throw` 明确异常
+2. 或用安全 fallback（如 `init_raw` 中写全零缓冲区）
+
+### DELETE 执行器中 `delete_record` 位置
+
+`executor_delete.h` 中，`fh_->delete_record()` **必须在 WHERE 条件匹配后才调用**，不能对所有遍历到的记录无条件删除。原始框架中 `delete_record` 在 `if (rec != nullptr)` 块外部，会导致**所有记录被删除**而非仅匹配条件的记录。
+
+### 调试输出的副作用
+
+`std::cerr` 和 `std::cout` 调试打印会干扰：
+- CI 的 stderr/stdout 输出解析
+- `ix_defs.h` 中 `deserialize` 的 `std::cout << col_num_` 直接污染客户端返回数据
+- 提交前务必清理所有 `DEBUG:` 前缀的打印语句
+
+### 本地测试脚本不可盲信
+
+项目中的 `test_*.py` 脚本是其他 AI 生成的辅助工具，可能与赛题规范不一致。例如：
+- 缺少 SQL 分号（语法要求 `stmt ';'`）
+- 检查 `output.txt` 的路径可能与 CI 不同
+- 断言逻辑有误（如 `'1' not in r` 误匹配 `Total record(s): 1`）
+
+**一切以赛题全文和 CI 返回为准**，本地测试仅作参考。
