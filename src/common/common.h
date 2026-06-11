@@ -57,25 +57,9 @@ struct Value {
         assert(raw == nullptr);
         raw = std::make_shared<RmRecord>(len);
         if (type == TYPE_INT) {
-            if (len == sizeof(int)) {
-                *(int *)(raw->data) = int_val;
-            } else if (len == sizeof(float)) {
-                // 隐式 INT→FLOAT 转换
-                *(float *)(raw->data) = (float)int_val;
-                type = TYPE_FLOAT;
-            } else {
-                assert(false);
-            }
+            *(int *)(raw->data) = int_val;
         } else if (type == TYPE_FLOAT) {
-            if (len == sizeof(float)) {
-                *(float *)(raw->data) = float_val;
-            } else if (len == sizeof(int)) {
-                // 隐式 FLOAT→INT 转换
-                *(int *)(raw->data) = (int)float_val;
-                type = TYPE_INT;
-            } else {
-                assert(false);
-            }
+            *(float *)(raw->data) = float_val;
         } else if (type == TYPE_STRING) {
             if (len < (int)str_val.size()) {
                 throw StringOverflowError();

@@ -186,8 +186,6 @@ void *client_handler(void *sock_fd) {
 
     // Clear
     std::cout << "Terminating current client_connection..." << std::endl;
-    // 优雅关闭：先 shutdown WR 确保缓冲数据发送完毕，再 close
-    shutdown(fd, SHUT_WR);
     close(fd);           // close a file descriptor.
     pthread_exit(NULL);  // terminate calling thread!
 }
