@@ -39,29 +39,24 @@ void SmManager::create_db(const std::string& db_name) {
     }
     //为数据库创建一个子目录
     std::string cmd = "mkdir " + db_name;
-    if (system(cmd.c_str()) < 0) {  // 创建一个名为db_name的目录
+    if (system(cmd.c_str()) < 0) {
         throw UnixError();
-    // chdir is now handled by open_db
-
-
-
     }
-    //创建系统目录
+    // 进入数据库目录，后续文件创建在 db_name/ 内
+    if (chdir(db_name.c_str()) < 0) {
+        throw UnixError();
+    }
+    // 创建系统元数据文件
     DbMeta *new_db = new DbMeta();
     new_db->name_ = db_name;
-
-    // 注意，此处ofstream会在当前目录创建(如果没有此文件先创建)和打开一个名为DB_META_NAME的文件
     std::ofstream ofs(DB_META_NAME);
-
-    // 将new_db中的信息，按照定义好的operator<<操作符，写入到ofs打开的DB_META_NAME文件中
-    ofs << *new_db;  // 注意：此处重载了操作符<<
-
+    ofs << *new_db;
     delete new_db;
 
     // 创建日志文件
     disk_manager_->create_file(LOG_FILE_NAME);
 
-    // 回到根目录
+    // 回到上级目录
     if (chdir("..") < 0) {
         throw UnixError();
     }
@@ -86,12 +81,17 @@ void SmManager::drop_db(const std::string& db_name) {
  * @param {string&} db_name 数据库名称，与文件夹同名
  */
 void SmManager::open_db(const std::string& db_name) {
-    // 切换到数据库目录
     if (!is_dir(db_name)) {
         throw DatabaseNotFoundError(db_name);
     }
     if (chdir(db_name.c_str()) < 0) {
         throw UnixError();
+    }
+    // 加载数据库元数据
+    std::ifstream ifs(DB_META_NAME);
+    if (ifs.is_open()) {
+        ifs >> db_;
+        ifs.close();
     }
 }
 
