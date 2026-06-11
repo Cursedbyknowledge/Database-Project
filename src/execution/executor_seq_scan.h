@@ -67,5 +67,8 @@ class SeqScanExecutor : public AbstractExecutor {
 
     bool is_end() const override { return scan_ ? scan_->is_end() : true; }
 
+    const std::vector<ColMeta> &cols() const override { return cols_; }
+    size_t tupleLen() const override { return len_; }
+
     Rid &rid() override { return rid_; }
 };

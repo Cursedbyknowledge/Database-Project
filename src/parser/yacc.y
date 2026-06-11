@@ -56,6 +56,7 @@ CHECKPOINT STATIC_CHECKPOINT
 %type <sv_orderby> order_clause opt_order_clause
 %type <sv_orderby_dir> opt_asc_desc
 %type <sv_setKnobType> set_knob_type
+%type <sv_cols> agg_item
 %type <sv_int> opt_limit
 
 %%
@@ -203,8 +204,8 @@ dml:
     ;
 
 opt_group_clause:
-        /* epsilon */
-    |   GROUP BY colNameList
+        /* epsilon */ { }
+    |   GROUP BY colNameList { }
     ;
 
 optHavingClause:

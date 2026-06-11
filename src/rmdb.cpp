@@ -277,6 +277,7 @@ int main(int argc, char **argv) {
     }
 
     signal(SIGINT, sigint_handler);
+    signal(SIGPIPE, SIG_IGN);  // 忽略 SIGPIPE，避免客户端异常断开导致服务器崩溃
     try {
         std::cout << "\n"
                      "  _____  __  __ _____  ____  \n"

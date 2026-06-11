@@ -96,5 +96,8 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
 
     bool is_end() const override { return isend_; }
 
+    const std::vector<ColMeta> &cols() const override { return cols_; }
+    size_t tupleLen() const override { return len_; }
+
     Rid &rid() override { return _abstract_rid; }
 };
