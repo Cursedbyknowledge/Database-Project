@@ -37,10 +37,10 @@ void SmManager::create_db(const std::string& db_name) {
     if (is_dir(db_name)) {
         throw DatabaseExistsError(db_name);
     }
-    // 保存启动时的原始CWD，output.txt写在此目录
+    // 保存启动时的原始CWD，用于恢复
     char buf[1024];
-    if (getcwd(buf, sizeof(buf)) != nullptr) {
-        cwd_ = std::string(buf);
+    if (getcwd(buf, sizeof(buf)) == nullptr) {
+        throw UnixError();
     }
     //为数据库创建一个子目录
     std::string cmd = "mkdir " + db_name;
