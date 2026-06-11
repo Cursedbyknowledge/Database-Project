@@ -41,9 +41,10 @@ void SmManager::create_db(const std::string& db_name) {
     std::string cmd = "mkdir " + db_name;
     if (system(cmd.c_str()) < 0) {  // 创建一个名为db_name的目录
         throw UnixError();
-    }
-    if (chdir(db_name.c_str()) < 0) {  // 进入名为db_name的目录
-        throw UnixError();
+    // chdir is now handled by open_db
+
+
+
     }
     //创建系统目录
     DbMeta *new_db = new DbMeta();
