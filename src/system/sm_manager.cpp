@@ -37,21 +37,28 @@ void SmManager::create_db(const std::string& db_name) {
     if (is_dir(db_name)) {
         throw DatabaseExistsError(db_name);
     }
-    // 为数据库创建一个子目录
+    //为数据库创建一个子目录
     std::string cmd = "mkdir " + db_name;
     if (system(cmd.c_str()) < 0) {
         throw UnixError();
     }
-    // 创建系统元数据文件(使用完整路径,不改变CWD)
+    if (chdir(db_name.c_str()) < 0) {
+        throw UnixError();
+    }
+    // 创建系统元数据文件
     DbMeta *new_db = new DbMeta();
     new_db->name_ = db_name;
-    std::string meta_path = db_name + "/" + DB_META_NAME;
-    std::ofstream ofs(meta_path);
+    std::ofstream ofs(DB_META_NAME);
     ofs << *new_db;
     delete new_db;
 
-    // 创建日志文件(使用完整路径)
-    disk_manager_->create_file(db_name + "/" + LOG_FILE_NAME);
+    // 创建日志文件
+    disk_manager_->create_file(LOG_FILE_NAME);
+
+    // 回到上级目录（使后续SQL操作在启动目录下进行）
+    if (chdir("..") < 0) {
+        throw UnixError();
+    }
 }
 
 /**
