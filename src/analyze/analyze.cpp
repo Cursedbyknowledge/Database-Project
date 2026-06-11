@@ -62,10 +62,19 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
         auto &tab = sm_manager_->db_.get_table(x->tab_name);
         for (auto &sv_clause : x->set_clauses) {
             // 检查列是否存在
-            tab.get_col(sv_clause->col_name);
+            auto col_it = tab.get_col(sv_clause->col_name);
             SetClause clause;
             clause.lhs = {.tab_name = x->tab_name, .col_name = sv_clause->col_name};
             clause.rhs = convert_sv_value(sv_clause->val);
+            // 隐式类型转换：INT↔FLOAT
+            if (col_it->type != clause.rhs.type) {
+                if (col_it->type == TYPE_FLOAT && clause.rhs.type == TYPE_INT) {
+                    clause.rhs.set_float((float)clause.rhs.int_val);
+                } else if (col_it->type == TYPE_INT && clause.rhs.type == TYPE_FLOAT) {
+                    clause.rhs.set_int((int)clause.rhs.float_val);
+                }
+            }
+            clause.rhs.init_raw(col_it->len);
             query->set_clauses.push_back(clause);
         }
         // 处理 WHERE 条件
@@ -155,6 +164,14 @@ void Analyze::check_clause(const std::vector<std::string> &tab_names, std::vecto
         ColType lhs_type = lhs_col->type;
         ColType rhs_type;
         if (cond.is_rhs_val) {
+            // 隐式类型转换：INT↔FLOAT
+            if (lhs_type != cond.rhs_val.type) {
+                if (lhs_type == TYPE_FLOAT && cond.rhs_val.type == TYPE_INT) {
+                    cond.rhs_val.set_float((float)cond.rhs_val.int_val);
+                } else if (lhs_type == TYPE_INT && cond.rhs_val.type == TYPE_FLOAT) {
+                    cond.rhs_val.set_int((int)cond.rhs_val.float_val);
+                }
+            }
             cond.rhs_val.init_raw(lhs_col->len);
             rhs_type = cond.rhs_val.type;
         } else {

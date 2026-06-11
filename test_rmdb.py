@@ -43,45 +43,45 @@ def main():
     def fail(msg): nonlocal f_; print(f'[FAIL] {msg}'); f_ += 1
     
     try:
-        ok("1. CREATE TABLE"); send_sql("CREATE TABLE t1 (id INT, val INT)")
+        ok("1. CREATE TABLE"); send_sql("CREATE TABLE t1 (id INT, val INT);")
         ok("2. INSERT x3")
-        send_sql("INSERT INTO t1 VALUES (1, 100)")
-        send_sql("INSERT INTO t1 VALUES (2, 200)")
-        send_sql("INSERT INTO t1 VALUES (3, 300)")
+        send_sql("INSERT INTO t1 VALUES (1, 100);")
+        send_sql("INSERT INTO t1 VALUES (2, 200);")
+        send_sql("INSERT INTO t1 VALUES (3, 300);")
         
-        r = send_sql("SELECT * FROM t1", True)
+        r = send_sql("SELECT * FROM t1;", True)
         (ok if '1' in r and '100' in r else fail)("3. SELECT *")
         
-        ok("4. CREATE INDEX"); send_sql("CREATE INDEX t1(val)")
+        ok("4. CREATE INDEX"); send_sql("CREATE INDEX t1(val);")
         
-        r = send_sql("SHOW INDEX FROM t1", True)
+        r = send_sql("SHOW INDEX FROM t1;", True)
         (ok if 't1' in r and 'val' in r else fail)("5. SHOW INDEX")
         
-        r = send_sql("SELECT * FROM t1 WHERE val = 200", True)
+        r = send_sql("SELECT * FROM t1 WHERE val = 200;", True)
         (ok if '2' in r and '200' in r else fail)("6. Index scan val=200")
         
-        ok("7. UPDATE"); send_sql("UPDATE t1 SET val = 999 WHERE id = 1")
+        ok("7. UPDATE"); send_sql("UPDATE t1 SET val = 999 WHERE id = 1;")
         
-        r = send_sql("SELECT * FROM t1 WHERE val = 100", True)
+        r = send_sql("SELECT * FROM t1 WHERE val = 100;", True)
         (ok if '100' not in r or '0' in r.split('Total')[-1] else fail)("8. val=100 empty after UPDATE")
         
-        r = send_sql("SELECT * FROM t1 WHERE val = 999", True)
+        r = send_sql("SELECT * FROM t1 WHERE val = 999;", True)
         (ok if '1' in r and '999' in r else fail)("9. val=999 after UPDATE")
         
-        ok("10. DELETE"); send_sql("DELETE FROM t1 WHERE id = 2")
+        ok("10. DELETE"); send_sql("DELETE FROM t1 WHERE id = 2;")
         
-        r = send_sql("SELECT * FROM t1", True)
-        (ok if '1' in r and '2' not in r else fail)("11. After DELETE")
+        r = send_sql("SELECT * FROM t1;", True)
+        (ok if '1' in r and ' 2 ' not in r and '200' not in r else fail)("11. After DELETE")
         
-        r = send_sql("SELECT * FROM t1 WHERE val = 200", True)
+        r = send_sql("SELECT * FROM t1 WHERE val = 200;", True)
         (ok if '200' not in r or '0' in r.split('Total')[-1] else fail)("12. val=200 empty after DELETE")
         
-        ok("13. DROP INDEX"); send_sql("DROP INDEX t1(val)")
-        r = send_sql("SHOW INDEX FROM t1", True)
+        ok("13. DROP INDEX"); send_sql("DROP INDEX t1(val);")
+        r = send_sql("SHOW INDEX FROM t1;", True)
         (ok if 'val' not in r else fail)("14. SHOW INDEX after drop")
         
-        ok("15. DROP TABLE"); send_sql("DROP TABLE t1")
-        r = send_sql("SHOW TABLES", True)
+        ok("15. DROP TABLE"); send_sql("DROP TABLE t1;")
+        r = send_sql("SHOW TABLES;", True)
         (ok if 't1' not in r else fail)("16. SHOW TABLES after drop")
         
         # Check output.txt

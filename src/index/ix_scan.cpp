@@ -26,6 +26,7 @@ void IxScan::next() {
         iid_.slot_no = 0;
         iid_.page_no = node->get_next_leaf();
     }
+    bpm_->unpin_page(node->get_page_id(), false);  // 释放fetch_node持有的pin
 }
 
 Rid IxScan::rid() const {

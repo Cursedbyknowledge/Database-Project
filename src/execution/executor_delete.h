@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 #include "executor_abstract.h"
 #include "index/ix.h"
 #include "system/sm.h"
+#include "execution_common.h"
 
 class DeleteExecutor : public AbstractExecutor {
    private:
@@ -38,9 +39,20 @@ class DeleteExecutor : public AbstractExecutor {
 
     std::unique_ptr<RmRecord> Next() override {
         for (auto& rid : rids_) {
-            // 先从索引中删除对应的条目
+            // 获取记录并进行条件过滤
             auto rec = fh_->get_record(rid, context_);
             if (rec != nullptr) {
+                // 检查是否满足WHERE条件
+                bool match = true;
+                for (auto& cond : conds_) {
+                    if (!eval_cond(rec->data, cond, tab_.cols)) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (!match) continue;
+                
+                // 先从索引中删除对应的条目
                 for (auto& index : tab_.indexes) {
                     auto ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);
                     auto ih = sm_manager_->ihs_.at(ix_name).get();
@@ -53,8 +65,9 @@ class DeleteExecutor : public AbstractExecutor {
                     ih->delete_entry(key, context_ ? context_->txn_ : nullptr);
                     delete[] key;
                 }
+                // 删除记录本身（只在匹配条件时删除）
+                fh_->delete_record(rid, context_);
             }
-            fh_->delete_record(rid, context_);
         }
         return nullptr;
     }

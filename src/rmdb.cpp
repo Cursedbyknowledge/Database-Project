@@ -126,23 +126,15 @@ void *client_handler(void *sock_fd) {
             if (ast::parse_tree != nullptr) {
                 try {
                     // analyze and rewrite
-                    std::cerr << "DEBUG: analyze start" << std::endl;
                     std::shared_ptr<Query> query = analyze->do_analyze(ast::parse_tree);
-                    std::cerr << "DEBUG: analyze done" << std::endl;
                     yy_delete_buffer(buf);
                     finish_analyze = true;
                     pthread_mutex_unlock(buffer_mutex);
                     // 优化器
-                    std::cerr << "DEBUG: plan_query start" << std::endl;
                     std::shared_ptr<Plan> plan = optimizer->plan_query(query, context);
-                    std::cerr << "DEBUG: plan_query done" << std::endl;
                     // portal
-                    std::cerr << "DEBUG: portal start" << std::endl;
                     std::shared_ptr<PortalStmt> portalStmt = portal->start(plan, context);
-                    std::cerr << "DEBUG: portal start done" << std::endl;
-                    std::cerr << "DEBUG: portal run" << std::endl;
                     portal->run(portalStmt, ql_manager.get(), &txn_id, context);
-                    std::cerr << "DEBUG: portal run done" << std::endl;
                     portal->drop();
                 } catch (TransactionAbortException &e) {
                     // 事务需要回滚，需要把abort信息返回给客户端并写入output.txt文件中
@@ -194,6 +186,8 @@ void *client_handler(void *sock_fd) {
 
     // Clear
     std::cout << "Terminating current client_connection..." << std::endl;
+    // 优雅关闭：先 shutdown WR 确保缓冲数据发送完毕，再 close
+    shutdown(fd, SHUT_WR);
     close(fd);           // close a file descriptor.
     pthread_exit(NULL);  // terminate calling thread!
 }
