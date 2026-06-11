@@ -109,6 +109,14 @@ void DiskManager::create_file(const std::string &path) {
     if (is_file(path)) {
         throw FileExistsError(path);
     }
+    // Ensure parent directory exists
+    size_t pos = path.find_last_of('/');
+    if (pos != std::string::npos) {
+        std::string parent = path.substr(0, pos);
+        if (!is_dir(parent)) {
+            create_dir(parent);
+        }
+    }
     int fd = open(path.c_str(), O_CREAT | O_RDWR, 0644);
     if (fd < 0) {
         throw UnixError();
