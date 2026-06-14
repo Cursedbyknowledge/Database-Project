@@ -85,14 +85,38 @@ extern int yydebug;
     TXN_ABORT = 286,               /* TXN_ABORT  */
     TXN_ROLLBACK = 287,            /* TXN_ROLLBACK  */
     ORDER_BY = 288,                /* ORDER_BY  */
-    LEQ = 289,                     /* LEQ  */
-    NEQ = 290,                     /* NEQ  */
-    GEQ = 291,                     /* GEQ  */
-    T_EOF = 292,                   /* T_EOF  */
-    IDENTIFIER = 293,              /* IDENTIFIER  */
-    VALUE_STRING = 294,            /* VALUE_STRING  */
-    VALUE_INT = 295,               /* VALUE_INT  */
-    VALUE_FLOAT = 296              /* VALUE_FLOAT  */
+    ENABLE_NESTLOOP = 289,         /* ENABLE_NESTLOOP  */
+    ENABLE_SORTMERGE = 290,        /* ENABLE_SORTMERGE  */
+    EXPLAIN = 291,                 /* EXPLAIN  */
+    ANALYZE = 292,                 /* ANALYZE  */
+    COUNT = 293,                   /* COUNT  */
+    MAX_TOKEN = 294,               /* MAX_TOKEN  */
+    MIN_TOKEN = 295,               /* MIN_TOKEN  */
+    SUM_TOKEN = 296,               /* SUM_TOKEN  */
+    AVG = 297,                     /* AVG  */
+    GROUP = 298,                   /* GROUP  */
+    HAVING = 299,                  /* HAVING  */
+    LIMIT = 300,                   /* LIMIT  */
+    UNION_TOKEN = 301,             /* UNION_TOKEN  */
+    ALL = 302,                     /* ALL  */
+    ON = 303,                      /* ON  */
+    AS = 304,                      /* AS  */
+    ISOLATION = 305,               /* ISOLATION  */
+    LEVEL = 306,                   /* LEVEL  */
+    SNAPSHOT_TOKEN = 307,          /* SNAPSHOT_TOKEN  */
+    SERIALIZABLE = 308,            /* SERIALIZABLE  */
+    TRANSACTION = 309,             /* TRANSACTION  */
+    CHECKPOINT = 310,              /* CHECKPOINT  */
+    STATIC_CHECKPOINT = 311,       /* STATIC_CHECKPOINT  */
+    LEQ = 312,                     /* LEQ  */
+    NEQ = 313,                     /* NEQ  */
+    GEQ = 314,                     /* GEQ  */
+    T_EOF = 315,                   /* T_EOF  */
+    IDENTIFIER = 316,              /* IDENTIFIER  */
+    VALUE_STRING = 317,            /* VALUE_STRING  */
+    VALUE_INT = 318,               /* VALUE_INT  */
+    VALUE_FLOAT = 319,             /* VALUE_FLOAT  */
+    VALUE_BOOL = 320               /* VALUE_BOOL  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif

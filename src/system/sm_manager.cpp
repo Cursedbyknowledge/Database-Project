@@ -104,12 +104,6 @@ void SmManager::flush_meta() {
  * @description: 关闭数据库并把数据落盘
  */
 void SmManager::close_db() {
-    // flush 所有索引文件头到磁盘
-    for (auto &entry : ihs_) {
-        ix_manager_->close_index(entry.second.get());
-    }
-    ihs_.clear();
-    // flush 数据库元数据
     flush_meta();
 }
 

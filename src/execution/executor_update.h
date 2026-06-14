@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 #include "executor_abstract.h"
 #include "index/ix.h"
 #include "system/sm.h"
+#include "execution_common.h"
 
 class UpdateExecutor : public AbstractExecutor {
    private:
@@ -39,8 +40,19 @@ class UpdateExecutor : public AbstractExecutor {
     }
     std::unique_ptr<RmRecord> Next() override {
         for (auto& rid : rids_) {
+            // 获取记录并进行条件过滤
             auto rec = fh_->get_record(rid, context_);
             if (rec == nullptr) continue;
+            
+            // 检查是否满足WHERE条件
+            bool match = true;
+            for (auto& cond : conds_) {
+                if (!eval_cond(rec->data, cond, tab_.cols)) {
+                    match = false;
+                    break;
+                }
+            }
+            if (!match) continue;
             
             // 从所有索引中删除旧条目
             for (auto& index : tab_.indexes) {

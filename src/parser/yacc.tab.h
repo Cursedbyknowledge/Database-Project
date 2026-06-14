@@ -35,8 +35,8 @@
    especially those whose name start with YY_ or yy_.  They are
    private implementation details that can be changed or removed.  */
 
-#ifndef YY_YY_MNT_D_PHD1_DATABASE_COMPETITION_DB2024_RMDB_SRC_PARSER_YACC_TAB_H_INCLUDED
-# define YY_YY_MNT_D_PHD1_DATABASE_COMPETITION_DB2024_RMDB_SRC_PARSER_YACC_TAB_H_INCLUDED
+#ifndef YY_YY_YACC_TAB_HPP_INCLUDED
+# define YY_YY_YACC_TAB_HPP_INCLUDED
 /* Debug traces.  */
 #ifndef YYDEBUG
 # define YYDEBUG 0
@@ -87,15 +87,36 @@ extern int yydebug;
     ORDER_BY = 288,                /* ORDER_BY  */
     ENABLE_NESTLOOP = 289,         /* ENABLE_NESTLOOP  */
     ENABLE_SORTMERGE = 290,        /* ENABLE_SORTMERGE  */
-    LEQ = 291,                     /* LEQ  */
-    NEQ = 292,                     /* NEQ  */
-    GEQ = 293,                     /* GEQ  */
-    T_EOF = 294,                   /* T_EOF  */
-    IDENTIFIER = 295,              /* IDENTIFIER  */
-    VALUE_STRING = 296,            /* VALUE_STRING  */
-    VALUE_INT = 297,               /* VALUE_INT  */
-    VALUE_FLOAT = 298,             /* VALUE_FLOAT  */
-    VALUE_BOOL = 299               /* VALUE_BOOL  */
+    EXPLAIN = 291,                 /* EXPLAIN  */
+    ANALYZE = 292,                 /* ANALYZE  */
+    COUNT = 293,                   /* COUNT  */
+    MAX_TOKEN = 294,               /* MAX_TOKEN  */
+    MIN_TOKEN = 295,               /* MIN_TOKEN  */
+    SUM_TOKEN = 296,               /* SUM_TOKEN  */
+    AVG = 297,                     /* AVG  */
+    GROUP = 298,                   /* GROUP  */
+    HAVING = 299,                  /* HAVING  */
+    LIMIT = 300,                   /* LIMIT  */
+    UNION_TOKEN = 301,             /* UNION_TOKEN  */
+    ALL = 302,                     /* ALL  */
+    ON = 303,                      /* ON  */
+    AS = 304,                      /* AS  */
+    ISOLATION = 305,               /* ISOLATION  */
+    LEVEL = 306,                   /* LEVEL  */
+    SNAPSHOT_TOKEN = 307,          /* SNAPSHOT_TOKEN  */
+    SERIALIZABLE = 308,            /* SERIALIZABLE  */
+    TRANSACTION = 309,             /* TRANSACTION  */
+    CHECKPOINT = 310,              /* CHECKPOINT  */
+    STATIC_CHECKPOINT = 311,       /* STATIC_CHECKPOINT  */
+    LEQ = 312,                     /* LEQ  */
+    NEQ = 313,                     /* NEQ  */
+    GEQ = 314,                     /* GEQ  */
+    T_EOF = 315,                   /* T_EOF  */
+    IDENTIFIER = 316,              /* IDENTIFIER  */
+    VALUE_STRING = 317,            /* VALUE_STRING  */
+    VALUE_INT = 318,               /* VALUE_INT  */
+    VALUE_FLOAT = 319,             /* VALUE_FLOAT  */
+    VALUE_BOOL = 320               /* VALUE_BOOL  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -122,4 +143,4 @@ struct YYLTYPE
 int yyparse (void);
 
 
-#endif /* !YY_YY_MNT_D_PHD1_DATABASE_COMPETITION_DB2024_RMDB_SRC_PARSER_YACC_TAB_H_INCLUDED  */
+#endif /* !YY_YY_YACC_TAB_HPP_INCLUDED  */

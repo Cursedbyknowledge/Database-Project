@@ -22,16 +22,30 @@ See the Mulan PSL v2 for more details. */
 #include "index/ix.h"
 #include "record_printer.h"
 
-// 索引匹配规则：完全匹配索引字段，且全部为单点查询
+// 索引匹配规则：最左前缀匹配（赛题要求）
+// 匹配所有等值条件以及第一个范围条件
 bool Planner::get_index_cols(std::string tab_name, std::vector<Condition> curr_conds, std::vector<std::string>& index_col_names) {
     index_col_names.clear();
     for(auto& cond: curr_conds) {
-        if(cond.is_rhs_val && cond.op == OP_EQ && cond.lhs_col.tab_name.compare(tab_name) == 0)
-            index_col_names.push_back(cond.lhs_col.col_name);
+        if(cond.is_rhs_val && cond.lhs_col.tab_name.compare(tab_name) == 0) {
+            if (cond.op == OP_EQ) {
+                index_col_names.push_back(cond.lhs_col.col_name);
+            } else {
+                // 第一个范围条件也可以利用索引
+                index_col_names.push_back(cond.lhs_col.col_name);
+                break;
+            }
+        }
     }
+    if (index_col_names.empty()) return false;
     TabMeta& tab = sm_manager_->db_.get_table(tab_name);
     if(tab.is_index(index_col_names)) return true;
-    return false;
+    // 最左前缀匹配：逐列回退
+    while (index_col_names.size() > 1) {
+        index_col_names.pop_back();
+        if (tab.is_index(index_col_names)) return true;
+    }
+    return index_col_names.size() >= 1 && tab.is_index(index_col_names);
 }
 
 /**
