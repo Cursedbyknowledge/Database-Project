@@ -85,9 +85,7 @@ void SmManager::drop_db(const std::string& db_name) {
  * @param {string&} db_name 数据库名称，与文件夹同名
  */
 void SmManager::open_db(const std::string& db_name) {
-    if (chdir(db_name.c_str()) < 0) {
-        throw UnixError();
-    }
+    // open_db不改变CWD：所有文件(record/index/output/metadata)统一在启动目录
 }
 
 /**
@@ -103,9 +101,7 @@ void SmManager::flush_meta() {
  * @description: 关闭数据库并把数据落盘
  */
 void SmManager::close_db() {
-    if (chdir("..") < 0) {
-        throw UnixError();
-    }
+    // open_db不改变CWD，close_db也不改变
 }
 
 /**
