@@ -90,7 +90,6 @@ class UpdateExecutor : public AbstractExecutor {
                         if (dup_pos < dup_leaf->get_size() &&
                             ix_compare(dup_leaf->get_key(dup_pos), new_key, types, lens) == 0) {
                             sm_manager_->get_bpm()->unpin_page(dup_leaf->get_page_id(), false);
-                            delete[] old_key; delete[] new_key;
                             can_update = false;
                         } else {
                             sm_manager_->get_bpm()->unpin_page(dup_leaf->get_page_id(), false);
