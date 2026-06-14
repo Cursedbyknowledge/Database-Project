@@ -18,9 +18,8 @@ See the Mulan PSL v2 for more details. */
 class AbstractExecutor {
    public:
     Rid _abstract_rid;
-    int rows_ = 0;  // EXPLAIN ANALYZE: 本算子本次执行的累计行数
-
     Context *context_;
+    int rows_ = 0;  // EXPLAIN ANALYZE: 放在context_之后避免offset变化
 
     virtual ~AbstractExecutor() = default;
 

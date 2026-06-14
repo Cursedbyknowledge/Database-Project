@@ -72,7 +72,7 @@ class Portal
                 {
                     std::shared_ptr<ProjectionPlan> p = std::dynamic_pointer_cast<ProjectionPlan>(x->subplan_);
                     std::unique_ptr<AbstractExecutor> root= convert_plan_executor(p, context);
-                    portalTag tag = x->explain_ ? PORTAL_EXPLAIN : PORTAL_ONE_SELECT;
+                    portalTag tag = context->explain_ ? PORTAL_EXPLAIN : PORTAL_ONE_SELECT;
                     return std::make_shared<PortalStmt>(tag, std::move(p->sel_cols_), std::move(root), plan);
                 }
                     

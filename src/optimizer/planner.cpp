@@ -437,8 +437,8 @@ std::shared_ptr<Plan> Planner::do_planner(std::shared_ptr<Query> query, Context 
         std::shared_ptr<Plan> projection = generate_select_plan(std::move(query), context);
         auto dml = std::make_shared<DMLPlan>(T_select, projection, std::string(), std::vector<Value>(),
                                                     std::vector<Condition>(), std::vector<SetClause>());
-        dml->explain_ = x->explain_analyze;
-        projection->explain_ = x->explain_analyze;
+        // EXPLAIN标记通过Context传递，避免修改Plan基类布局
+        context->explain_ = x->explain_analyze;
         plannerRoot = dml;
     } else {
         throw InternalError("Unexpected AST root");

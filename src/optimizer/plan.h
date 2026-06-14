@@ -54,7 +54,6 @@ class Plan
 {
 public:
     PlanTag tag;
-    bool explain_ = false;  // EXPLAIN ANALYZE 模式
     virtual ~Plan() = default;
     
     // EXPLAIN ANALYZE: 序列化计划树 + 运行时行数
