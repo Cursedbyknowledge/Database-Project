@@ -163,9 +163,13 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     rec_printer.print_separator(context);
     rec_printer.print_record(captions, context);
     rec_printer.print_separator(context);
-    // print header into file
+    // print header into file (使用数据库绝对路径)
+    std::string out_path = sm_manager_->get_db_dir() + "/output.txt";
     std::fstream outfile;
-    outfile.open("output.txt", std::ios::out | std::ios::app);
+    outfile.open(out_path, std::ios::out | std::ios::app);
+    if (!outfile.is_open()) {
+        throw RMDBError("Cannot open output file: " + out_path);
+    }
     outfile << "|";
     for(int i = 0; i < captions.size(); ++i) {
         outfile << " " << captions[i] << " |";
@@ -209,21 +213,30 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     RecordPrinter::print_record_count(num_rec, context);
 }
 
-// EXPLAIN ANALYZE: 执行计划并输出计划树
+// EXPLAIN ANALYZE: 执行计划并输出计划树到 output.txt
 void QlManager::explain_select(std::shared_ptr<Plan> plan,
                                 std::unique_ptr<AbstractExecutor> executorTreeRoot,
                                 std::vector<TabCol> sel_cols, Context *context) {
-    // 执行查询计划
+    // 执行查询计划收集运行时信息
     for (executorTreeRoot->beginTuple(); !executorTreeRoot->is_end(); executorTreeRoot->nextTuple()) {
         executorTreeRoot->Next();
     }
-    // 输出EXPLAIN树（rows=0，行计数暂未实现）
+    // 生成EXPLAIN树
     std::map<const Plan*, int> rows_map;
     std::string out;
     plan->explain(0, rows_map, out);
+    // 发送给客户端
     memcpy(context->data_send_, out.c_str(), std::min(out.size(), (size_t)BUFFER_LENGTH - 1));
     context->data_send_[std::min(out.size(), (size_t)BUFFER_LENGTH - 1)] = '\0';
     *(context->offset_) = out.size();
+    // 写入数据库目录下的 output.txt
+    std::string out_path = sm_manager_->get_db_dir() + "/output.txt";
+    std::fstream outfile;
+    outfile.open(out_path, std::ios::out | std::ios::app);
+    if (outfile.is_open()) {
+        outfile << out;
+        outfile.close();
+    }
 }
 
 // 执行DML语句
