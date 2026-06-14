@@ -11,6 +11,8 @@ void yyerror(YYLTYPE *locp, const char* s) {
 }
 
 using namespace ast;
+// 全局变量：暂存JOIN ON条件，供SELECT规则合并到WHERE条件中
+static std::vector<std::shared_ptr<BinaryExpr>> g_join_on_conds;
 %}
 
 %define api.pure full
@@ -178,26 +180,38 @@ dml:
     }
     |   SELECT selector FROM tableList optWhereClause opt_order_clause opt_limit
     {
-        auto sel = std::make_shared<SelectStmt>($2, $4, $5, $6);
+        // 合并JOIN ON条件到WHERE条件
+        auto merged_conds = $5;
+        merged_conds.insert(merged_conds.end(), g_join_on_conds.begin(), g_join_on_conds.end());
+        g_join_on_conds.clear();
+        auto sel = std::make_shared<SelectStmt>($2, $4, merged_conds, $6);
         if ($7 > 0) sel->limit_val = $7;
         $$ = sel;
     }
     |   SELECT agg_selector FROM tableList optWhereClause opt_group_clause optHavingClause opt_order_clause opt_limit
     {
-        // Aggregation query with GROUP BY / HAVING
-        auto sel = std::make_shared<SelectStmt>($2, $4, $5, $8);
+        auto merged_conds = $5;
+        merged_conds.insert(merged_conds.end(), g_join_on_conds.begin(), g_join_on_conds.end());
+        g_join_on_conds.clear();
+        auto sel = std::make_shared<SelectStmt>($2, $4, merged_conds, $8);
         if ($9 > 0) sel->limit_val = $9;
         $$ = sel;
     }
     |   EXPLAIN ANALYZE SELECT selector FROM tableList optWhereClause opt_order_clause
     {
-        auto sel = std::make_shared<SelectStmt>($4, $6, $7, $8);
+        auto merged_conds = $7;
+        merged_conds.insert(merged_conds.end(), g_join_on_conds.begin(), g_join_on_conds.end());
+        g_join_on_conds.clear();
+        auto sel = std::make_shared<SelectStmt>($4, $6, merged_conds, $8);
         sel->explain_analyze = true;
         $$ = sel;
     }
     |   EXPLAIN ANALYZE SELECT agg_selector FROM tableList optWhereClause opt_group_clause optHavingClause opt_order_clause
     {
-        auto sel = std::make_shared<SelectStmt>($4, $6, $7, $10);
+        auto merged_conds = $7;
+        merged_conds.insert(merged_conds.end(), g_join_on_conds.begin(), g_join_on_conds.end());
+        g_join_on_conds.clear();
+        auto sel = std::make_shared<SelectStmt>($4, $6, merged_conds, $10);
         sel->explain_analyze = true;
         $$ = sel;
     }
@@ -498,6 +512,8 @@ tableList:
     |   tableList JOIN tbName ON whereClause
     {
         $$.push_back($3);
+        // 保存ON条件，稍后合并到SELECT的WHERE条件中
+        g_join_on_conds.insert(g_join_on_conds.end(), $5.begin(), $5.end());
     }
     ;
 
