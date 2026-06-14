@@ -45,6 +45,7 @@ class ProjectionExecutor : public AbstractExecutor {
     std::unique_ptr<RmRecord> Next() override {
         auto prev_rec = prev_->Next();
         if (!prev_rec) return nullptr;
+        runtime_rows_++;  // Project/Filter rows: 过滤/投影后的行数
         auto proj_rec = std::make_unique<RmRecord>(len_);
         for (size_t i = 0; i < sel_idxs_.size(); i++) {
             auto& col = cols_[i];
@@ -60,4 +61,5 @@ class ProjectionExecutor : public AbstractExecutor {
     size_t tupleLen() const override { return len_; }
 
     Rid &rid() override { return _abstract_rid; }
+    std::vector<AbstractExecutor*> get_children() override { return {prev_.get()}; }
 };

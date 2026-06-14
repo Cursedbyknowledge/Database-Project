@@ -20,6 +20,7 @@ class AbstractExecutor {
     Rid _abstract_rid;
 
     Context *context_;
+    int runtime_rows_ = 0;  // EXPLAIN ANALYZE: 运行时累计行数
 
     virtual ~AbstractExecutor() = default;
 
@@ -43,6 +44,9 @@ class AbstractExecutor {
     virtual std::unique_ptr<RmRecord> Next() = 0;
 
     virtual ColMeta get_col_offset(const TabCol &target) { return ColMeta();};
+
+    // 返回子执行器(用于EXPLAIN收集行数)
+    virtual std::vector<AbstractExecutor*> get_children() { return {}; }
 
     std::vector<ColMeta>::const_iterator get_col(const std::vector<ColMeta> &rec_cols, const TabCol &target) {
         auto pos = std::find_if(rec_cols.begin(), rec_cols.end(), [&](const ColMeta &col) {

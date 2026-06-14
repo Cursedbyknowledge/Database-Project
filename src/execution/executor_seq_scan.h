@@ -57,6 +57,7 @@ class SeqScanExecutor : public AbstractExecutor {
         rid_ = scan_->rid();
         auto rec = fh_->get_record(rid_, context_);
         if (rec == nullptr) return nullptr;
+        runtime_rows_++;  // Scan rows: 扫描到的总行数
         for (auto& cond : fed_conds_) {
             if (!eval_cond(rec->data, cond, cols_)) {
                 return nullptr;

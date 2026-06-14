@@ -291,8 +291,25 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
         executorTreeRoot->Next();
     }
     
-    // 生成EXPLAIN树（自由函数，不修改Plan类vtable）
+    // 递归收集行数：遍历计划树和执行器树
     std::map<const Plan*, int> rows_map;
+    std::function<void(std::shared_ptr<Plan>, AbstractExecutor*)> collect;
+    collect = [&](std::shared_ptr<Plan> p, AbstractExecutor* e) {
+        if (!p || !e) return;
+        rows_map[p.get()] = e->runtime_rows_;
+        auto children = e->get_children();
+        if (auto pp = std::dynamic_pointer_cast<ProjectionPlan>(p)) {
+            if (!children.empty()) collect(pp->subplan_, children[0]);
+        } else if (auto jp = std::dynamic_pointer_cast<JoinPlan>(p)) {
+            if (children.size() >= 2) {
+                collect(jp->left_, children[0]);
+                collect(jp->right_, children[1]);
+            }
+        }
+    };
+    collect(plan, executorTreeRoot.get());
+    
+    // 生成EXPLAIN树
     std::string out;
     explain_plan(plan, 0, rows_map, out);
     
