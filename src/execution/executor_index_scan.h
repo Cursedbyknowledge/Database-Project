@@ -63,29 +63,49 @@ class IndexScanExecutor : public AbstractExecutor {
 
 
 
+
     void beginTuple() override {
         auto ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index_col_names_);
         auto ih = sm_manager_->ihs_.at(ix_name).get();
         Iid start = ih->leaf_begin();
         Iid end   = ih->leaf_end();
-        // 等值条件：用lower_bound缩小扫描起点（不改end避免upper_bound=get_size()边界问题）
+        // 等值条件：lower_bound定位起点, lower_bound(key+1)定位终点
         for (auto &cond : conds_) {
             if (!cond.is_rhs_val || cond.lhs_col.tab_name != tab_name_)
                 continue;
             if (cond.op != OP_EQ) continue;
             int col_tot = index_meta_.col_tot_len;
             char *key_buf = new char[col_tot];
+            char *key_end = new char[col_tot];
             memset(key_buf, 0, col_tot);
+            memcpy(key_end, key_buf, col_tot);
             int off = 0;
             for (auto &icol : index_meta_.cols) {
                 if (icol.name == cond.lhs_col.col_name) {
                     memcpy(key_buf + off, cond.rhs_val.raw->data, icol.len);
+                    memcpy(key_end + off, cond.rhs_val.raw->data, icol.len);
+                    // 构造key+1作为终点（INT:值+1; FLOAT:值+1; CHAR:末字节+1）
+                    if (icol.type == TYPE_INT) {
+                        (*(int*)(key_end + off))++;
+                    } else if (icol.type == TYPE_FLOAT) {
+                        float f = *(float*)(key_end + off);
+                        *(float*)(key_end + off) = f + 1.0f;
+                    } else {
+                        // CHAR: 末非0xFF字节+1
+                        for (int k = icol.len - 1; k >= 0; k--) {
+                            unsigned char &c = (unsigned char &)key_end[off + k];
+                            if (c < 0xFF) { c++; break; }
+                            c = 0;
+                        }
+                    }
                     break;
                 }
                 off += icol.len;
             }
             start = ih->lower_bound(key_buf);
+            end   = ih->lower_bound(key_end);
             delete[] key_buf;
+            delete[] key_end;
             break;
         }
         scan_ = std::make_unique<IxScan>(ih, start, end, sm_manager_->get_bpm());
