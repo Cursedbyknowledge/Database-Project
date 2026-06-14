@@ -26,7 +26,6 @@ public:
         : lock_mgr_(lock_mgr), log_mgr_(log_mgr), txn_(txn),
           data_send_(data_send), offset_(offset) {
             ellipsis_ = false;
-            explain_ = false;
           }
 
     // TransactionManager *txn_mgr_;
@@ -36,5 +35,4 @@ public:
     char *data_send_;
     int *offset_;
     bool ellipsis_;
-    bool explain_;
 };

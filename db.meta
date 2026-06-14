@@ -1,0 +1,23 @@
+
+3
+grade
+3
+grade name 2 20 0 0
+grade id 0 4 20 0
+grade score 1 4 24 0
+0
+
+t3
+2
+t3 a 0 4 0 0
+t3 b 0 4 4 0
+0
+
+warehouse
+2
+warehouse w_id 0 4 0 1
+warehouse name 2 8 4 0
+1
+warehouse 4 1
+warehouse w_id 0 4 0 0
+
