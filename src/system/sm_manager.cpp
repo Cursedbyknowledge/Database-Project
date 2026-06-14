@@ -42,8 +42,8 @@ void SmManager::create_db(const std::string& db_name) {
     if (getcwd(buf, sizeof(buf)) == nullptr) {
         throw UnixError();
     }
-    //为数据库创建一个子目录
-    std::string cmd = "mkdir " + db_name;
+    //为数据库创建一个子目录 (mkdir -p 确保中间目录存在)
+    std::string cmd = "mkdir -p " + db_name;
     if (system(cmd.c_str()) < 0) {
         throw UnixError();
     }

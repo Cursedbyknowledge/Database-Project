@@ -282,14 +282,13 @@ int main(int argc, char **argv) {
                      "Welcome to RMDB!\n"
                      "Type 'help;' for help.\n"
                      "\n";
-        // Database name is passed by args
+        // 数据库路径：绝对路径直接使用，相对路径强制放在 build/ 下
         std::string db_name = argv[1];
-        if (!sm_manager->is_dir(db_name)) {
-            // Database not found, create a new one
-            sm_manager->create_db(db_name);
+        std::string db_path = (db_name[0] == '/') ? db_name : ("build/" + db_name);
+        if (!sm_manager->is_dir(db_path)) {
+            sm_manager->create_db(db_path);
         }
-        // Open database
-        sm_manager->open_db(db_name);
+        sm_manager->open_db(db_path);
 
         // recovery database
         recovery->analyze();
