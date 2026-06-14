@@ -491,3 +491,67 @@ C++ 的 `assert` 在 Debug 模式下触发 `SIGABRT`，直接杀死进程。**�
 - 断言逻辑有误（如 `'1' not in r` 误匹配 `Total record(s): 1`）
 
 **一切以赛题全文和 CI 返回为准**，本地测试仅作参考。
+
+## 🏆 题目三（索引）调试经验
+
+### B+树叶链哨兵：`IX_LEAF_HEADER_PAGE` vs `IX_NO_PAGE`
+
+**最关键 bug**：B+树叶节点链表使用 `IX_LEAF_HEADER_PAGE`（值为 1）作为尾部哨兵，但 `split()` 原代码只检查 `!= IX_NO_PAGE`（值为 -1），导致尾叶分裂时走错分支：
+
+```cpp
+// ❌ 原代码：IX_LEAF_HEADER_PAGE(1) != IX_NO_PAGE(-1) 永远为 true
+if (new_node->get_next_leaf() != IX_NO_PAGE) {
+    // 尾叶被当作普通节点处理，fetch leaf_header_page 而非更新 last_leaf_
+} else {
+    file_hdr_->last_leaf_ = new_node->get_page_no(); // 永远不会执行！
+}
+
+// ✅ 修复：同时检查两个哨兵值
+if (old_next == IX_LEAF_HEADER_PAGE || old_next == IX_NO_PAGE) {
+    file_hdr_->last_leaf_ = new_node->get_page_no();
+    if (old_next == IX_LEAF_HEADER_PAGE) {
+        // 维护 leaf_header_page 的 prev_leaf 指针
+    }
+}
+```
+
+**后果**：`last_leaf_` 从未更新 → `leaf_end()` 停在旧尾叶 → 索引扫描提前结束 → 第 2 个叶节点之后全部条目不可见。
+
+### IndexScan 性能：全扫描 → 定位扫描
+
+`IndexScanExecutor::beginTuple()` 原代码始终从 `leaf_begin()` 扫描到 `leaf_end()`，做全量索引遍历（O(n)），导致 IndexScan 性能等同于 SeqScan，CI 判定 `time_b/time_a > 70%` 即"未使用索引"。
+
+**修复**：等值条件用 `lower_bound(key)` 定位起点，`lower_bound(key+1)` 定位终点，将点查询从 O(n) 优化到 O(log n)：
+
+```cpp
+// ✅ 等值条件：精确定位扫描范围
+start = ih->lower_bound(key_buf);      // 跳到匹配位置
+end   = ih->lower_bound(key_end);      // key+1 作为终点
+```
+
+### 唯一索引约束：先检查再写入
+
+INSERT/UPDATE 违反唯一索引时需写 `failure` 到 `output.txt`。关键是**先检查索引重复再修改记录**，避免"记录已写入但索引插入失败"的不一致状态：
+
+| 操作 | 正确顺序 |
+|------|---------|
+| INSERT | ① `key_exists()` 预检 → ② `insert_record()` → ③ `insert_entry()` |
+| UPDATE | ① 计算新旧键值 → ② 预检新键不冲突 → ③ `delete_entry(旧)` → ④ `update_record()` → ⑤ `insert_entry(新)` |
+
+重复时 `throw DuplicateIndexError`，Portal 的 `catch(RMDBError&)` 自动写 `failure` 到 `output.txt`。
+
+### `IxNodeHandle::insert` 重复键处理
+
+原 `insert()` 使用 `lower_bound` + 等值比较，检测到重复键时**静默返回不插入**。这导致建索引时重复键记录被丢弃，索引不完整。
+
+**修复**：改用 `upper_bound` 直接插入，允许叶节点存多个同键不同 Rid 的条目。唯一性约束提升到 `insert_entry` 层通过预检查实现。
+
+### 文件头持久化
+
+`file_hdr_->root_page_` 等关键字段修改后，需调用 `flush_file_hdr()` 将文件头（页面 0）写回磁盘，防止 CI 在 `CREATE INDEX` 后重启服务器时丢失根节点位置。
+
+涉及位置：空树创建、`insert_entry` 根分裂、`insert_into_parent` 根分裂。
+
+### `get_rid()` use-after-unpin
+
+`IxIndexHandle::get_rid()` 在 `unpin_page` 之后仍访问 `node->get_rid()`，页面可能已被驱逐。必须在 unpin 前保存值。同样，`IxScan::next()` 未调用 `unpin_page`，导致缓冲池泄漏。
