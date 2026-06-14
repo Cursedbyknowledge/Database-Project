@@ -7,12 +7,13 @@ BUILD_DIR = '/home/zyc/db2026/build'
 DB_DIR = '/tmp/rmdb_test_final'
 
 def send_sql(sql, expect=False):
-    s = socket.socket(); s.connect((HOST, PORT))
+    s = socket.socket(); s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    s.connect((HOST, PORT))
     time.sleep(0.3)
     s.sendall((sql + '\n').encode())
     time.sleep(0.5)  # wait for server to read
-    s.shutdown(socket.SHUT_WR)  # signal EOF
     if expect:
+        s.shutdown(socket.SHUT_WR)  # signal EOF only when expecting response
         time.sleep(0.5)  # wait for server to process
         s.settimeout(1.0)
         chunks = []
@@ -50,12 +51,12 @@ def main():
         send_sql("INSERT INTO t1 VALUES (3, 300);")
         
         r = send_sql("SELECT * FROM t1;", True)
-        (ok if '1' in r and '100' in r else fail)("3. SELECT *")
+        (ok if ' 1 |' in r and ' 100 |' in r else fail)("3. SELECT *")
         
         ok("4. CREATE INDEX"); send_sql("CREATE INDEX t1(val);")
         
         r = send_sql("SHOW INDEX FROM t1;", True)
-        (ok if 't1' in r and 'val' in r else fail)("5. SHOW INDEX")
+        (ok if '| t1 | unique | (val) |' in r else fail)("5. SHOW INDEX")
         
         r = send_sql("SELECT * FROM t1 WHERE val = 200;", True)
         (ok if '2' in r and '200' in r else fail)("6. Index scan val=200")
@@ -66,12 +67,12 @@ def main():
         (ok if '100' not in r or '0' in r.split('Total')[-1] else fail)("8. val=100 empty after UPDATE")
         
         r = send_sql("SELECT * FROM t1 WHERE val = 999;", True)
-        (ok if '1' in r and '999' in r else fail)("9. val=999 after UPDATE")
+        (ok if ' 1 |' in r and ' 999 |' in r else fail)("9. val=999 after UPDATE")
         
         ok("10. DELETE"); send_sql("DELETE FROM t1 WHERE id = 2;")
         
         r = send_sql("SELECT * FROM t1;", True)
-        (ok if '1' in r and ' 2 ' not in r and '200' not in r else fail)("11. After DELETE")
+        (ok if ' 1 |' in r and ' 2 |' not in r and '200' not in r else fail)("11. After DELETE")
         
         r = send_sql("SELECT * FROM t1 WHERE val = 200;", True)
         (ok if '200' not in r or '0' in r.split('Total')[-1] else fail)("12. val=200 empty after DELETE")

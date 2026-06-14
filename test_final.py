@@ -63,7 +63,7 @@ r = do("SELECT * FROM t3;")
 check("DELETE", r, ["2", "20"])
 assert ' 1 ' not in r and ' 10' not in r, "deleted record should not appear"
 
-# === TEST 5: INDEX ===
+# === TEST 5: INDEX (创建、查询) ===
 do("CREATE TABLE warehouse (w_id INT, name CHAR(8));")
 do("INSERT INTO warehouse VALUES (10, 'qweruiop');")
 do("INSERT INTO warehouse VALUES (534, 'asdfhjkl');")
@@ -79,6 +79,28 @@ check("Index EQ", r, ["10", "qweruiop"])
 
 r = do("SELECT * FROM warehouse WHERE w_id < 534 AND w_id > 100;")
 check("Index range", r, ["500", "bgtyhnmj"])
+
+# === TEST 6: DROP INDEX + CREATE INDEX on different column ===
+# Note: 已知 "Page 0" bug, 以下测试预期失败
+print("[INFO] TEST 6: DROP INDEX + CREATE on different column (known Page 0 bug)")
+do("DROP INDEX warehouse(w_id);")
+do("CREATE INDEX warehouse(name);")
+r = do("SELECT * FROM warehouse WHERE name = 'qweruiop';")
+check("Index on name column", r, ["10", "qweruiop"])
+
+# === TEST 7: 索引维护 (INSERT/UPDATE after CREATE INDEX) ===
+print("[INFO] TEST 7: Index maintenance (INSERT/UPDATE after CREATE INDEX)")
+do("DROP TABLE warehouse;")
+do("CREATE TABLE warehouse (w_id INT, name CHAR(8));")
+do("INSERT INTO warehouse VALUES (10, 'qweruiop');")
+do("INSERT INTO warehouse VALUES (534, 'asdfhjkl');")
+do("CREATE INDEX warehouse(w_id);")
+do("INSERT INTO warehouse VALUES (500, 'lastdanc');")
+do("UPDATE warehouse SET w_id = 507 WHERE w_id = 534;")
+r = do("SELECT * FROM warehouse WHERE w_id = 10;")
+check("Index maintain EQ", r, ["10", "qweruiop"])
+r = do("SELECT * FROM warehouse WHERE w_id < 534 AND w_id > 100;")
+check("Index maintain range", r, ["500", "lastdanc", "507", "asdfhjkl"])
 
 # === VERIFY output.txt ===
 s.close()
