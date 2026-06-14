@@ -8,8 +8,11 @@ passed, failed = 0, 0
 def do(s, sql, wait=0.3):
     s.sendall((sql + '\n').encode()); time.sleep(wait)
     s.settimeout(5.0)
-    try: return s.recv(65536).decode('utf-8', errors='replace')
-    except socket.timeout: return '(timeout)'
+    try:
+        data = s.recv(65536)
+        return data.decode('utf-8', errors='replace')
+    except Exception:
+        return '(error)'
 
 def check(name, result, expected_parts):
     global passed, failed
@@ -52,7 +55,12 @@ check("1c. EXPLAIN ANALYZE has Filter", r, ['Filter'])
 check("1d. EXPLAIN ANALYZE has Scan", r, ['Scan'])
 check("1e. EXPLAIN ANALYZE has rows=", r, ['rows='])
 check("1f. EXPLAIN ANALYZE has SeqScan", r, ['SeqScan'])
-check("1g. Scan rows=5", r, ['t', 'rows=5'])
+check("1g. Scan rows=5", r, ['Scan(table=t,', 'rows=5'])
+# 验证 EXPLAIN 输出三层缩进结构（列名可能用*表示，取决于sel_cols_实现）
+check("1h. EXPLAIN indent structure",
+      r.replace('\t', '|TAB|'),
+      ['Project(columns=[', '|TAB|Filter(condition=[t.a>1, t.b<10]',
+       '|TAB||TAB|Scan(table=t,'])
 
 # ============================================================
 # 测试点2: 选择运算下推
@@ -70,10 +78,9 @@ do(s, 'INSERT INTO orders VALUES (103, 2, \'2025-01-03\', 900.0);')
 do(s, 'INSERT INTO orders VALUES (104, 2, \'2025-01-04\', 1500.0);')
 do(s, 'INSERT INTO orders VALUES (105, 3, \'2025-01-05\', 700.0);')
 
-# 先用不带JOIN别名的简单查询验证
-# 普通SELECT
+# SELECT * 输出12列，用total_amount值和记录数精确验证
 r = do(s, 'SELECT * FROM customers, orders WHERE customers.customer_id = orders.customer_id AND orders.total_amount > 1000;')
-check("2a. Predicate pushdown SELECT", r, ['Alice', '102', 'Bob', '104'])
+check("2a. Predicate pushdown SELECT", r, ['Alice', '1200.000000', 'Bob', '1500.000000', 'Total record(s): 2'])
 
 # EXPLAIN ANALYZE (过滤条件应下推到orders扫描之上)
 r = do(s, 'EXPLAIN ANALYZE SELECT * FROM customers, orders WHERE customers.customer_id = orders.customer_id AND orders.total_amount > 1000;')
@@ -100,7 +107,8 @@ do(s, 'INSERT INTO orders VALUES (104, 2, \'2025-01-04\', 1500.0);')
 do(s, 'INSERT INTO orders VALUES (105, 3, \'2025-01-05\', 700.0);')
 
 r = do(s, 'SELECT name, order_id FROM customers, orders WHERE customers.customer_id = orders.customer_id;')
-check("3a. Projection pushdown SELECT", r, ['Alice', '101', 'Bob', '103', 'Carol', '105'])
+# JOIN产生5行：Alice×2, Bob×2, Carol×1，验证全部出现
+check("3a. Projection pushdown SELECT (Alice 2 rows)", r, ['Alice', '101', 'Alice', '102', 'Bob', '103', 'Bob', '104', 'Carol', '105', 'Total record(s): 5'])
 
 r = do(s, 'EXPLAIN ANALYZE SELECT name, order_id FROM customers, orders WHERE customers.customer_id = orders.customer_id;')
 check("3b. EXPLAIN has Project/Join/Scan", r, ['Project'])
