@@ -16,8 +16,6 @@ See the Mulan PSL v2 for more details. */
 #include <string>
 #include <vector>
 #include <map>
-#include <sstream>
-#include <functional>
 #include "parser/ast.h"
 
 #include "parser/parser.h"
@@ -140,13 +138,10 @@ class JoinPlan : public Plan
             int rows = rows_map.count(this) ? rows_map.at(this) : 0;
             out += std::string(indent, '\t');
             out += "Join(";
-            // tables
+            // 递归收集表名（不用std::function，避免引入<functional>头文件）
             std::vector<std::string> tabs;
-            std::function<void(const std::shared_ptr<Plan>&)> collect = [&](auto p) {
-                if (auto s = std::dynamic_pointer_cast<ScanPlan>(p)) tabs.push_back(s->tab_name_);
-                else if (auto j = std::dynamic_pointer_cast<JoinPlan>(p)) { collect(j->left_); collect(j->right_); }
-            };
-            collect(left_); collect(right_);
+            collect_join_tables(left_, tabs);
+            collect_join_tables(right_, tabs);
             out += "tables=[";
             for (size_t i = 0; i < tabs.size(); i++) { if(i) out += ", "; out += tabs[i]; }
             out += "], condition=[";
@@ -159,6 +154,15 @@ class JoinPlan : public Plan
             out += "], rows=" + std::to_string(rows) + ")\n";
             left_->explain(indent + 1, rows_map, out);
             right_->explain(indent + 1, rows_map, out);
+        }
+        // 递归收集Join树中的所有表名
+        static void collect_join_tables(const std::shared_ptr<Plan>& p, std::vector<std::string>& tabs) {
+            if (auto s = std::dynamic_pointer_cast<ScanPlan>(p)) {
+                tabs.push_back(s->tab_name_);
+            } else if (auto j = std::dynamic_pointer_cast<JoinPlan>(p)) {
+                collect_join_tables(j->left_, tabs);
+                collect_join_tables(j->right_, tabs);
+            }
         }
         // 左节点
         std::shared_ptr<Plan> left_;
