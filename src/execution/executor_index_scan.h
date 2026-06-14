@@ -68,12 +68,11 @@ class IndexScanExecutor : public AbstractExecutor {
         auto ih = sm_manager_->ihs_.at(ix_name).get();
         Iid start = ih->leaf_begin();
         Iid end   = ih->leaf_end();
-        // 利用第一个匹配索引列的等值条件缩小扫描范围：lower_bound+upper_bound定位
+        // 等值条件：用lower_bound缩小扫描起点（不改end避免upper_bound=get_size()边界问题）
         for (auto &cond : conds_) {
             if (!cond.is_rhs_val || cond.lhs_col.tab_name != tab_name_)
                 continue;
-            if (cond.op != OP_EQ) continue;  // 仅处理等值条件（CI judge_use_index场景）
-            // 构造完整索引键值
+            if (cond.op != OP_EQ) continue;
             int col_tot = index_meta_.col_tot_len;
             char *key_buf = new char[col_tot];
             memset(key_buf, 0, col_tot);
@@ -86,7 +85,6 @@ class IndexScanExecutor : public AbstractExecutor {
                 off += icol.len;
             }
             start = ih->lower_bound(key_buf);
-            end   = ih->upper_bound(key_buf);
             delete[] key_buf;
             break;
         }
