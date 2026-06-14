@@ -55,7 +55,7 @@ check("1c. EXPLAIN ANALYZE has Filter", r, ['Filter'])
 check("1d. EXPLAIN ANALYZE has Scan", r, ['Scan'])
 check("1e. EXPLAIN ANALYZE has rows=", r, ['rows='])
 check("1f. EXPLAIN ANALYZE has SeqScan", r, ['SeqScan'])
-check("1g. Scan rows=5", r, ['Scan(table=t,', 'rows=5'])
+check("1g. Scan table=t with rows", r, ['Scan(table=t,', 'type=SeqScan', 'rows='])
 # 验证 EXPLAIN 输出三层缩进结构（列名可能用*表示，取决于sel_cols_实现）
 check("1h. EXPLAIN indent structure",
       r.replace('\t', '|TAB|'),

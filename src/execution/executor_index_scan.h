@@ -117,7 +117,6 @@ class IndexScanExecutor : public AbstractExecutor {
 
     std::unique_ptr<RmRecord> Next() override {
         if (scan_->is_end()) return nullptr;
-        rows_++;  // 计数扫描行数
         rid_ = scan_->rid();
         try {
             auto rec = fh_->get_record(rid_, context_);

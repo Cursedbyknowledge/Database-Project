@@ -45,7 +45,6 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     }
 
     void beginTuple() override {
-        rows_ = 0;
         left_->beginTuple();
     }
 
@@ -73,7 +72,6 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
                         }
                     }
                     if (match) {
-                        rows_++;  // 计数连接输出行
                         isend_ = false;
                         return;
                     }
@@ -102,6 +100,4 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     size_t tupleLen() const override { return len_; }
 
     Rid &rid() override { return _abstract_rid; }
-
-    std::vector<AbstractExecutor*> sub_executors() override { return {left_.get(), right_.get()}; }
 };
