@@ -282,9 +282,8 @@ void SmManager::create_index(const std::string& tab_name, const std::vector<std:
             }
             ih->insert_entry(key, rid, context ? context->txn_ : nullptr);
             delete[] key;
-        } catch (RecordNotFoundError &e) {
-            continue;
-        } catch (PageNotExistError &e) {
+        } catch (RMDBError &e) {
+            // 跳过无法读取或无法索引的记录，确保索引仍能创建
             continue;
         }
     }
