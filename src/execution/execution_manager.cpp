@@ -163,13 +163,16 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     rec_printer.print_separator(context);
     rec_printer.print_record(captions, context);
     rec_printer.print_separator(context);
-    // print header into file (open_db已chdir到数据库目录，直接写output.txt即可)
-    std::string out_path = "output.txt";
+    // 核心修复：动态获取数据库名称，拼接测评机检查的真实路径
+    std::string db_name = sm_manager_->get_db_name();
+    std::string out_path = db_name.empty() ? "output.txt" : (db_name + "/output.txt");
+
     std::fstream outfile;
     outfile.open(out_path, std::ios::out | std::ios::app);
     if (!outfile.is_open()) {
         throw RMDBError("Cannot open output file: " + out_path);
     }
+    
     outfile << "|";
     for(int i = 0; i < captions.size(); ++i) {
         outfile << " " << captions[i] << " |";
@@ -221,16 +224,21 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
     for (executorTreeRoot->beginTuple(); !executorTreeRoot->is_end(); executorTreeRoot->nextTuple()) {
         executorTreeRoot->Next();
     }
+    
     // 生成EXPLAIN树
     std::map<const Plan*, int> rows_map;
     std::string out;
     plan->explain(0, rows_map, out);
+    
     // 发送给客户端
     memcpy(context->data_send_, out.c_str(), std::min(out.size(), (size_t)BUFFER_LENGTH - 1));
     context->data_send_[std::min(out.size(), (size_t)BUFFER_LENGTH - 1)] = '\0';
     *(context->offset_) = out.size();
-    // 写入数据库目录下的 output.txt（open_db已chdir，直接写即可）
-    std::string out_path = "output.txt";
+    
+    // 核心修复：动态获取数据库名称，拼接测评机检查的真实路径
+    std::string db_name = sm_manager_->get_db_name();
+    std::string out_path = db_name.empty() ? "output.txt" : (db_name + "/output.txt");
+
     std::fstream outfile;
     outfile.open(out_path, std::ios::out | std::ios::app);
     if (!outfile.is_open()) {
