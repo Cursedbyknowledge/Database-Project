@@ -101,7 +101,7 @@ class UpdateExecutor : public AbstractExecutor {
                 delete[] old_key; delete[] new_key;
                 if (!can_update) break;
             }
-            if (!can_update) continue;  // 唯一性冲突，跳过此记录
+            if (!can_update) throw DuplicateIndexError(tab_name_, "");  // 抛异常→Portal写failure
             
             // 从所有索引中删除旧条目
             for (auto& index : tab_.indexes) {

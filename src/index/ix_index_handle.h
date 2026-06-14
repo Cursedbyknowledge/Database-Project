@@ -180,6 +180,7 @@ class IxIndexHandle {
 
     // 检查键值是否存在（用于唯一索引约束预检）
     bool key_exists(const char *key) {
+        if (file_hdr_->root_page_ == IX_NO_PAGE) return false;
         std::vector<Rid> rids;
         return get_value(key, &rids, nullptr);
     }
