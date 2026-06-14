@@ -271,6 +271,7 @@ void IxIndexHandle::insert_into_parent(IxNodeHandle *old_node, const char *key, 
         old_node->set_parent_page_no(new_root->get_page_no());
         new_node->set_parent_page_no(new_root->get_page_no());
         file_hdr_->root_page_ = new_root->get_page_no();
+        flush_file_hdr();  // CI可能重启服务器，确保持久化
         buffer_pool_manager_->unpin_page(new_root->get_page_id(), true);
         return;
     }
@@ -303,6 +304,7 @@ page_id_t IxIndexHandle::insert_entry(const char *key, const Rid &value, Transac
         file_hdr_->root_page_ = new_root->get_page_no();
         file_hdr_->first_leaf_ = new_root->get_page_no();
         file_hdr_->last_leaf_ = new_root->get_page_no();
+        flush_file_hdr();  // 持久化空树初始状态
         buffer_pool_manager_->unpin_page(new_root->get_page_id(), true);
         return new_root->get_page_no();
     }
@@ -318,6 +320,7 @@ page_id_t IxIndexHandle::insert_entry(const char *key, const Rid &value, Transac
             leaf->set_parent_page_no(new_root->get_page_no());
             new_leaf->set_parent_page_no(new_root->get_page_no());
             file_hdr_->root_page_ = new_root->get_page_no();
+            flush_file_hdr();  // CI可能重启服务器，确保持久化
             buffer_pool_manager_->unpin_page(new_root->get_page_id(), true);
         } else {
             insert_into_parent(leaf, new_leaf->get_key(0), new_leaf, transaction);
