@@ -85,8 +85,9 @@ void SmManager::drop_db(const std::string& db_name) {
  * @param {string&} db_name 数据库名称，与文件夹同名
  */
 void SmManager::open_db(const std::string& db_name) {
-    // CI测试不使用持久化,open_db保持为空避免改变CWD
-    // output.txt需要写在当前工作目录(通常是build/)
+    if (chdir(db_name.c_str()) < 0) {
+        throw UnixError();
+    }
 }
 
 /**
@@ -102,8 +103,9 @@ void SmManager::flush_meta() {
  * @description: 关闭数据库并把数据落盘
  */
 void SmManager::close_db() {
-    // CI测试环境下保持CWD不变
-    // 注意: create_db中已经chdir进入并退出, 此处不需要额外chdir
+    if (chdir("..") < 0) {
+        throw UnixError();
+    }
 }
 
 /**

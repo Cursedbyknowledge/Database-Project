@@ -84,8 +84,8 @@ def main():
         r = send_sql("SHOW TABLES;", True)
         (ok if 't1' not in r else fail)("16. SHOW TABLES after drop")
         
-        # Check output.txt (在CWD，与CI一致)
-        op = 'output.txt'
+        # Check output.txt
+        op = os.path.join(DB_DIR, 'output.txt')
         if os.path.exists(op):
             c = open(op).read()
             fc = c.count('failure')

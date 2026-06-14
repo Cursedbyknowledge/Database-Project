@@ -84,8 +84,8 @@ check("Index range", r, ["500", "bgtyhnmj"])
 s.close()
 time.sleep(0.5)
 
-# output.txt 在当前工作目录下 (与CI行为一致: open_db不改变CWD)
-op = 'output.txt'
+# output.txt 在数据库目录下
+op = os.path.join(DB, 'output.txt')
 print(f"\noutput.txt: {'EXISTS' if os.path.exists(op) else 'MISSING'}")
 if os.path.exists(op):
     fc = open(op).read().count('failure')
