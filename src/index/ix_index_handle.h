@@ -178,6 +178,12 @@ class IxIndexHandle {
     std::pair<IxNodeHandle *, bool> find_leaf_page(const char *key, Operation operation, Transaction *transaction,
                                                  bool find_first = false);
 
+    // 检查键值是否存在（用于唯一索引约束预检）
+    bool key_exists(const char *key) {
+        std::vector<Rid> rids;
+        return get_value(key, &rids, nullptr);
+    }
+
     // for insert
     page_id_t insert_entry(const char *key, const Rid &value, Transaction *transaction);
 
