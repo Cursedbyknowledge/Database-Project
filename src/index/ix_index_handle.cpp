@@ -610,12 +610,13 @@ IxNodeHandle *IxIndexHandle::fetch_node(int page_no) const {
 /**
  * @brief 从已排序的entries直接构建B+树，绕过insert_entry/split框架bug
  * @param entries 已按键排序的(key,rid)对列表
+ * 关键：所有叶节点在构建内部节点前保持pinned，避免CI环境小buffer pool导致的evict
  */
 void IxIndexHandle::build_from_sorted(const std::vector<std::pair<std::string, Rid>> &entries) {
     if (entries.empty()) return;
     int leaf_sz = file_hdr_->btree_order_;  // 每叶节点最多存btree_order_条(留1位)
 
-    // 1. 构建叶节点
+    // 1. 构建叶节点 (保持pinned直到内部节点构建完成)
     std::vector<page_id_t> leaf_pages;
     std::vector<IxNodeHandle*> leaf_nodes;
     for (size_t i = 0; i < entries.size(); ) {
@@ -629,7 +630,6 @@ void IxIndexHandle::build_from_sorted(const std::vector<std::pair<std::string, R
         if (!leaf_pages.empty()) {
             leaf->set_prev_leaf(leaf_pages.back());
             leaf_nodes.back()->set_next_leaf(leaf->get_page_no());
-            buffer_pool_manager_->unpin_page(leaf_nodes.back()->get_page_id(), true);
         } else {
             leaf->set_prev_leaf(IX_LEAF_HEADER_PAGE);
             file_hdr_->first_leaf_ = leaf->get_page_no();
@@ -638,37 +638,67 @@ void IxIndexHandle::build_from_sorted(const std::vector<std::pair<std::string, R
         file_hdr_->last_leaf_ = leaf->get_page_no();
         leaf_pages.push_back(leaf->get_page_no());
         leaf_nodes.push_back(leaf);
+        // 不unpin：保持pinned直到内部节点构建完毕
     }
-    buffer_pool_manager_->unpin_page(leaf_nodes.back()->get_page_id(), true);
 
     // 2. 只有1个叶节点则该叶节点即为根
     if (leaf_pages.size() == 1) {
         file_hdr_->root_page_ = leaf_pages[0];
+        buffer_pool_manager_->unpin_page(leaf_nodes[0]->get_page_id(), true);
+        flush_file_hdr();
         return;
     }
 
-    // 3. 自底向上构建内部节点
+    // 3. 自底向上构建内部节点 (叶节点仍pinned，直接使用其指针)
+    //    使用leaf_nodes[k]直读child key，无需fetch_node
     std::vector<page_id_t> curr_level = leaf_pages;
     int internal_sz = file_hdr_->btree_order_;
+    size_t leaf_idx = 0;  // 叶节点在leaf_nodes中的索引
     while (curr_level.size() > 1) {
         std::vector<page_id_t> next_level;
-        for (size_t i = 0; i < curr_level.size(); ) {
+        for (size_t i_cur = 0; i_cur < curr_level.size(); ) {
             IxNodeHandle *internal = create_node();
             internal->page_hdr->is_leaf = false;
-            int n = std::min(internal_sz, (int)(curr_level.size() - i));
-            for (int j = 0; j < n; j++, i++) {
-                page_id_t child_page = curr_level[i];
-                IxNodeHandle *child = fetch_node(child_page);
-                internal->insert_pair(j, child->get_key(0), Rid{child_page, -1});
-                child->set_parent_page_no(internal->get_page_no());
-                buffer_pool_manager_->unpin_page(child->get_page_id(), true);
+            int n = std::min(internal_sz, (int)(curr_level.size() - i_cur));
+            for (int j = 0; j < n; j++, i_cur++) {
+                page_id_t child_page = curr_level[i_cur];
+                const char *first_key;
+                if (curr_level.data() == leaf_pages.data()) {
+                    // 第一层：孩子是叶节点，直接使用缓存的leaf_nodes指针
+                    first_key = leaf_nodes[leaf_idx + i_cur]->get_key(0);
+                    leaf_nodes[leaf_idx + i_cur]->set_parent_page_no(internal->get_page_no());
+                } else {
+                    // 更高层：需要fetch子节点（之前已unpin）
+                    IxNodeHandle *child = fetch_node(child_page);
+                    first_key = child->get_key(0);
+                    child->set_parent_page_no(internal->get_page_no());
+                    buffer_pool_manager_->unpin_page(child->get_page_id(), true);
+                }
+                internal->insert_pair(j, first_key, Rid{child_page, -1});
             }
             buffer_pool_manager_->unpin_page(internal->get_page_id(), true);
             next_level.push_back(internal->get_page_no());
+            if (curr_level.data() == leaf_pages.data()) {
+                leaf_idx += n;  // 跳过已处理的叶节点
+            }
         }
         curr_level = next_level;
     }
     file_hdr_->root_page_ = curr_level[0];
+
+    // 4. 释放所有叶节点 (现在可以安全unpin)
+    for (auto *node : leaf_nodes) {
+        buffer_pool_manager_->unpin_page(node->get_page_id(), true);
+    }
+    // 5. 将文件头刷入磁盘，确保root_page_等关键字段持久化
+    flush_file_hdr();
+}
+
+void IxIndexHandle::flush_file_hdr() {
+    char buf[PAGE_SIZE];
+    memset(buf, 0, PAGE_SIZE);
+    file_hdr_->serialize(buf);
+    disk_manager_->write_page(fd_, IX_FILE_HDR_PAGE, buf, PAGE_SIZE);
 }
 
 IxNodeHandle *IxIndexHandle::create_node() {

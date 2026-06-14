@@ -286,10 +286,8 @@ void SmManager::create_index(const std::string& tab_name, const std::vector<std:
         [&](const auto &a, const auto &b) {
             return memcmp(a.first.data(), b.first.data(), col_tot_len) < 0;
         });
-    // 插入索引（TODO: 后续改用 build_from_sorted 绕过 insert_entry 分裂bug）
-    for (auto &[key_str, rid] : entries) {
-        ih->insert_entry(key_str.c_str(), rid, context ? context->txn_ : nullptr);
-    }
+    // 直接构建B+树(绕过insert_entry/split框架bug，叶节点保持pinned避免CI evict)
+    ih->build_from_sorted(entries);
     ihs_.emplace(ix_name, std::move(ih));
     // 标记列上有索引
     for (auto &col_name : col_names) {
