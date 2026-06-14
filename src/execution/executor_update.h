@@ -54,6 +54,56 @@ class UpdateExecutor : public AbstractExecutor {
             }
             if (!match) continue;
             
+            // 预先检查索引唯一性：计算新键值，若已存在则拒绝更新
+            bool can_update = true;
+            for (auto& index : tab_.indexes) {
+                auto ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);
+                auto ih = sm_manager_->ihs_.at(ix_name).get();
+                // 计算旧键和新键
+                char* old_key = new char[index.col_tot_len];
+                char* new_key = new char[index.col_tot_len];
+                int off = 0;
+                for (int j = 0; j < index.col_num; ++j) {
+                    memcpy(old_key + off, rec->data + index.cols[j].offset, index.cols[j].len);
+                    // 新值：如果是SET子句中的列，用新值；否则用旧值
+                    bool found_in_set = false;
+                    for (auto& clause : set_clauses_) {
+                        if (clause.lhs.col_name == index.cols[j].name) {
+                            memcpy(new_key + off, clause.rhs.raw->data, index.cols[j].len);
+                            found_in_set = true;
+                            break;
+                        }
+                    }
+                    if (!found_in_set) {
+                        memcpy(new_key + off, rec->data + index.cols[j].offset, index.cols[j].len);
+                    }
+                    off += index.cols[j].len;
+                }
+                // 如果新旧键不同，检查新键是否已存在
+                if (memcmp(old_key, new_key, index.col_tot_len) != 0) {
+                    try {
+                        auto [dup_leaf, _] = ih->find_leaf_page(new_key, Operation::INSERT, context_ ? context_->txn_ : nullptr);
+                        int dup_pos = dup_leaf->lower_bound(new_key);
+                        std::vector<ColType> types;
+                        std::vector<int> lens;
+                        for (auto &c : index.cols) { types.push_back(c.type); lens.push_back(c.len); }
+                        if (dup_pos < dup_leaf->get_size() &&
+                            ix_compare(dup_leaf->get_key(dup_pos), new_key, types, lens) == 0) {
+                            sm_manager_->get_bpm()->unpin_page(dup_leaf->get_page_id(), false);
+                            delete[] old_key; delete[] new_key;
+                            can_update = false;
+                        } else {
+                            sm_manager_->get_bpm()->unpin_page(dup_leaf->get_page_id(), false);
+                        }
+                    } catch (IndexEntryNotFoundError&) {
+                        // 索引为空，无冲突
+                    }
+                }
+                delete[] old_key; delete[] new_key;
+                if (!can_update) break;
+            }
+            if (!can_update) continue;  // 唯一性冲突，跳过此记录
+            
             // 从所有索引中删除旧条目
             for (auto& index : tab_.indexes) {
                 auto ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);

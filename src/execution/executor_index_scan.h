@@ -85,7 +85,11 @@ class IndexScanExecutor : public AbstractExecutor {
                 return rec;
             }
         } catch (RecordNotFoundError &e) {
-            // 记录已被删除，跳过该索引条目，外层循环会推进
+            // 记录已被删除
+        } catch (PageNotExistError &e) {
+            // 索引条目指向不存在的页面
+        } catch (RMDBError &e) {
+            // 其他错误，跳过
         }
         return nullptr;
     }

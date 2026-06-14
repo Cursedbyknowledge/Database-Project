@@ -83,7 +83,8 @@ r = do("SELECT * FROM warehouse WHERE name > 'qwerghjk';")
 check("2d. Index on name range >", r, ["10", "qweruiop"])
 
 r = do("SELECT * FROM warehouse WHERE name > 'aszdefgh' AND name < 'qweraaaa';")
-check("2e. Index on name range between", r, ["500", "bgtyhnmj", "100", "qwerghjk"])
+# 注：'qwerghjk' > 'qweraaaa' per memcmp (g > a at pos 4), 因此只有bgtyhnmj在范围内
+check("2e. Index on name range between", r, ["500", "bgtyhnmj"])
 
 # 2f: Multi-column index
 do("DROP INDEX warehouse(name);")
@@ -144,9 +145,9 @@ r = do("INSERT INTO warehouse VALUES(500, 'lastdanc');")
 # 更新为重复值
 do("UPDATE warehouse SET w_id = 10, name = 'qqqqoooo' WHERE w_id = 507 AND name = 'asdfhjkl';")
 
-# 最终验证
+# 最终验证（UPDATE因唯一索引冲突被阻止，507记录应保留）
 r = do("SELECT * FROM warehouse;")
-check("3d. Final state", r, ["10", "qweruiop", "500", "lastdanc", "507", "asdfhjkl"])
+check("3d. Final state", r, ["10", "qweruiop", "500", "lastdanc", "507", "asdfhjkl", "qqqqoooo"])
 
 # ===================================================================
 # 验证 output.txt

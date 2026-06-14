@@ -149,6 +149,12 @@ class IncompatibleTypeError : public RMDBError {
         : RMDBError("Incompatible type error: lhs " + lhs + ", rhs " + rhs) {}
 };
 
+class DuplicateIndexError : public RMDBError {
+   public:
+    DuplicateIndexError(const std::string &tab_name, const std::string &col_name)
+        : RMDBError("Duplicate entry in unique index on table " + tab_name + ", column " + col_name) {}
+};
+
 class AmbiguousColumnError : public RMDBError {
    public:
     AmbiguousColumnError(const std::string &col_name) : RMDBError("Ambiguous column: " + col_name) {}
