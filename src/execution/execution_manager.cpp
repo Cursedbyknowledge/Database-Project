@@ -165,14 +165,11 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     rec_printer.print_separator(context);
     rec_printer.print_record(captions, context);
     rec_printer.print_separator(context);
-    // 核心修复：动态获取数据库名称，拼接测评机检查的真实路径
-    std::string db_name = sm_manager_->get_db_name();
-    std::string out_path = db_name.empty() ? "output.txt" : (db_name + "/output.txt");
-
+    // print header into file (open_db已chdir到数据库目录)
     std::fstream outfile;
-    outfile.open(out_path, std::ios::out | std::ios::app);
+    outfile.open("output.txt", std::ios::out | std::ios::app);
     if (!outfile.is_open()) {
-        throw RMDBError("Cannot open output file: " + out_path);
+        throw RMDBError("Cannot open output.txt");
     }
     
     outfile << "|";
@@ -302,13 +299,11 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
     context->data_send_[std::min(out.size(), (size_t)BUFFER_LENGTH - 1)] = '\0';
     *(context->offset_) = out.size();
     
-    // 写入 output.txt
-    std::string db_name = sm_manager_->get_db_name();
-    std::string out_path = db_name.empty() ? "output.txt" : (db_name + "/output.txt");
+    // 写入 output.txt (open_db已chdir到数据库目录)
     std::fstream outfile;
-    outfile.open(out_path, std::ios::out | std::ios::app);
+    outfile.open("output.txt", std::ios::out | std::ios::app);
     if (!outfile.is_open()) {
-        throw RMDBError("Cannot open EXPLAIN output file: " + out_path);
+        throw RMDBError("Cannot open EXPLAIN output.txt");
     }
     outfile << out;
     outfile.close();
