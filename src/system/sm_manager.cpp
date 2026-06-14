@@ -271,21 +271,16 @@ void SmManager::create_index(const std::string& tab_name, const std::vector<std:
     auto fh = fhs_.at(tab_name).get();
     for (RmScan scan(fh); !scan.is_end(); scan.next()) {
         auto rid = scan.rid();
-        try {
-            auto rec = fh->get_record(rid, context);
-            if (rec == nullptr) continue;
-            char *key = new char[col_tot_len];
-            int offset = 0;
-            for (auto &col : index_cols) {
-                memcpy(key + offset, rec->data + col.offset, col.len);
-                offset += col.len;
-            }
-            ih->insert_entry(key, rid, context ? context->txn_ : nullptr);
-            delete[] key;
-        } catch (RMDBError &e) {
-            // 跳过无法读取或无法索引的记录，确保索引仍能创建
-            continue;
+        auto rec = fh->get_record(rid, context);
+        if (rec == nullptr) continue;
+        char *key = new char[col_tot_len];
+        int offset = 0;
+        for (auto &col : index_cols) {
+            memcpy(key + offset, rec->data + col.offset, col.len);
+            offset += col.len;
         }
+        ih->insert_entry(key, rid, context ? context->txn_ : nullptr);
+        delete[] key;
     }
     ihs_.emplace(ix_name, std::move(ih));
     // 标记列上有索引
