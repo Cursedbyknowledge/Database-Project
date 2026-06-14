@@ -89,6 +89,20 @@ void SmManager::open_db(const std::string& db_name) {
     if (chdir(db_name.c_str()) < 0) {
         throw UnixError();
     }
+    // 加载数据库元数据
+    std::ifstream ifs(DB_META_NAME);
+    if (ifs.is_open()) {
+        ifs >> db_;
+        ifs.close();
+    }
+    // 打开所有记录文件和索引文件
+    for (auto &[tab_name, tab] : db_.tabs_) {
+        fhs_[tab_name] = rm_manager_->open_file(tab_name);
+        for (auto &index : tab.indexes) {
+            auto ix_name = ix_manager_->get_index_name(tab_name, index.cols);
+            ihs_[ix_name] = ix_manager_->open_index(tab_name, index.cols);
+        }
+    }
 }
 
 /**
