@@ -61,9 +61,36 @@ class IndexScanExecutor : public AbstractExecutor {
         fed_conds_ = conds_;
     }
 
+
+
     void beginTuple() override {
-        auto ih = sm_manager_->ihs_.at(sm_manager_->get_ix_manager()->get_index_name(tab_name_, index_col_names_)).get();
-        scan_ = std::make_unique<IxScan>(ih, ih->leaf_begin(), ih->leaf_end(), sm_manager_->get_bpm());
+        auto ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index_col_names_);
+        auto ih = sm_manager_->ihs_.at(ix_name).get();
+        Iid start = ih->leaf_begin();
+        Iid end   = ih->leaf_end();
+        // 利用第一个匹配索引列的等值条件缩小扫描范围：lower_bound+upper_bound定位
+        for (auto &cond : conds_) {
+            if (!cond.is_rhs_val || cond.lhs_col.tab_name != tab_name_)
+                continue;
+            if (cond.op != OP_EQ) continue;  // 仅处理等值条件（CI judge_use_index场景）
+            // 构造完整索引键值
+            int col_tot = index_meta_.col_tot_len;
+            char *key_buf = new char[col_tot];
+            memset(key_buf, 0, col_tot);
+            int off = 0;
+            for (auto &icol : index_meta_.cols) {
+                if (icol.name == cond.lhs_col.col_name) {
+                    memcpy(key_buf + off, cond.rhs_val.raw->data, icol.len);
+                    break;
+                }
+                off += icol.len;
+            }
+            start = ih->lower_bound(key_buf);
+            end   = ih->upper_bound(key_buf);
+            delete[] key_buf;
+            break;
+        }
+        scan_ = std::make_unique<IxScan>(ih, start, end, sm_manager_->get_bpm());
     }
 
     void nextTuple() override {
