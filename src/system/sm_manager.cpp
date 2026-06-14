@@ -89,11 +89,6 @@ void SmManager::open_db(const std::string& db_name) {
     if (chdir(db_name.c_str()) < 0) {
         throw UnixError();
     }
-    // 保存数据库绝对路径，供 output.txt 等文件操作使用
-    char cwd_buf[1024];
-    if (getcwd(cwd_buf, sizeof(cwd_buf)) != nullptr) {
-        db_dir_ = cwd_buf;
-    }
     // 加载数据库元数据
     std::ifstream ifs(DB_META_NAME);
     if (ifs.is_open()) {

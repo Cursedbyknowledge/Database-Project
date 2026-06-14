@@ -35,7 +35,6 @@ class SmManager {
     BufferPoolManager* buffer_pool_manager_;
     RmManager* rm_manager_;
     IxManager* ix_manager_;
-    std::string db_dir_;
 
    public:
     SmManager(DiskManager* disk_manager, BufferPoolManager* buffer_pool_manager, RmManager* rm_manager,
@@ -54,7 +53,6 @@ class SmManager {
     IxManager* get_ix_manager() { return ix_manager_; }  
 
     std::string get_db_name() { return db_.name_; }
-    std::string get_db_dir() { return db_dir_; }
 
     bool is_dir(const std::string& db_name);
 

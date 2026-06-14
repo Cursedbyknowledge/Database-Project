@@ -163,8 +163,9 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     rec_printer.print_separator(context);
     rec_printer.print_record(captions, context);
     rec_printer.print_separator(context);
-    // print header into file (使用数据库绝对路径)
-    std::string out_path = sm_manager_->get_db_dir() + "/output.txt";
+    // print header into file (CI 从 build/ 启动，故 db_name/output.txt 正确)
+    std::string db_name = sm_manager_->get_db_name();
+    std::string out_path = db_name + "/output.txt";
     std::fstream outfile;
     outfile.open(out_path, std::ios::out | std::ios::app);
     if (!outfile.is_open()) {
@@ -230,13 +231,15 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
     context->data_send_[std::min(out.size(), (size_t)BUFFER_LENGTH - 1)] = '\0';
     *(context->offset_) = out.size();
     // 写入数据库目录下的 output.txt
-    std::string out_path = sm_manager_->get_db_dir() + "/output.txt";
+    std::string db_name = sm_manager_->get_db_name();
+    std::string out_path = db_name + "/output.txt";
     std::fstream outfile;
     outfile.open(out_path, std::ios::out | std::ios::app);
-    if (outfile.is_open()) {
-        outfile << out;
-        outfile.close();
+    if (!outfile.is_open()) {
+        throw RMDBError("Cannot open EXPLAIN output file: " + out_path);
     }
+    outfile << out;
+    outfile.close();
 }
 
 // 执行DML语句
