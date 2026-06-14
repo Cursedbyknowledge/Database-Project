@@ -205,6 +205,9 @@ class IxIndexHandle {
 
     Iid leaf_begin() const;
 
+    // 从已排序的entries直接构建B+树(绕过insert_entry/split)
+    void build_from_sorted(const std::vector<std::pair<std::string, Rid>> &entries);
+
    private:
     // 辅助函数
     void update_root_page_no(page_id_t root) { file_hdr_->root_page_ = root; }

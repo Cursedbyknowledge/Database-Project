@@ -607,6 +607,70 @@ IxNodeHandle *IxIndexHandle::fetch_node(int page_no) const {
  * 在最开始插入时，一直是create node，那么first_page_no一直没变，一直是IX_NO_PAGE
  * 与Record的处理不同，Record将未插入满的记录页认为是free_page
  */
+/**
+ * @brief 从已排序的entries直接构建B+树，绕过insert_entry/split框架bug
+ * @param entries 已按键排序的(key,rid)对列表
+ */
+void IxIndexHandle::build_from_sorted(const std::vector<std::pair<std::string, Rid>> &entries) {
+    if (entries.empty()) return;
+    int leaf_sz = file_hdr_->btree_order_;  // 每叶节点最多存btree_order_条(留1位)
+
+    // 1. 构建叶节点
+    std::vector<page_id_t> leaf_pages;
+    std::vector<IxNodeHandle*> leaf_nodes;
+    for (size_t i = 0; i < entries.size(); ) {
+        IxNodeHandle *leaf = create_node();
+        leaf->page_hdr->is_leaf = true;
+        leaf->page_hdr->parent = IX_NO_PAGE;
+        int n = std::min(leaf_sz, (int)(entries.size() - i));
+        for (int j = 0; j < n; j++, i++) {
+            leaf->insert_pair(j, entries[i].first.c_str(), entries[i].second);
+        }
+        if (!leaf_pages.empty()) {
+            leaf->set_prev_leaf(leaf_pages.back());
+            leaf_nodes.back()->set_next_leaf(leaf->get_page_no());
+            buffer_pool_manager_->unpin_page(leaf_nodes.back()->get_page_id(), true);
+        } else {
+            leaf->set_prev_leaf(IX_LEAF_HEADER_PAGE);
+            file_hdr_->first_leaf_ = leaf->get_page_no();
+        }
+        leaf->set_next_leaf(IX_LEAF_HEADER_PAGE);
+        file_hdr_->last_leaf_ = leaf->get_page_no();
+        leaf_pages.push_back(leaf->get_page_no());
+        leaf_nodes.push_back(leaf);
+    }
+    buffer_pool_manager_->unpin_page(leaf_nodes.back()->get_page_id(), true);
+
+    // 2. 只有1个叶节点则该叶节点即为根
+    if (leaf_pages.size() == 1) {
+        file_hdr_->root_page_ = leaf_pages[0];
+        return;
+    }
+
+    // 3. 自底向上构建内部节点
+    std::vector<page_id_t> curr_level = leaf_pages;
+    int internal_sz = file_hdr_->btree_order_;
+    while (curr_level.size() > 1) {
+        std::vector<page_id_t> next_level;
+        for (size_t i = 0; i < curr_level.size(); ) {
+            IxNodeHandle *internal = create_node();
+            internal->page_hdr->is_leaf = false;
+            int n = std::min(internal_sz, (int)(curr_level.size() - i));
+            for (int j = 0; j < n; j++, i++) {
+                page_id_t child_page = curr_level[i];
+                IxNodeHandle *child = fetch_node(child_page);
+                internal->insert_pair(j, child->get_key(0), Rid{child_page, -1});
+                child->set_parent_page_no(internal->get_page_no());
+                buffer_pool_manager_->unpin_page(child->get_page_id(), true);
+            }
+            buffer_pool_manager_->unpin_page(internal->get_page_id(), true);
+            next_level.push_back(internal->get_page_no());
+        }
+        curr_level = next_level;
+    }
+    file_hdr_->root_page_ = curr_level[0];
+}
+
 IxNodeHandle *IxIndexHandle::create_node() {
     IxNodeHandle *node;
     file_hdr_->num_pages_++;
