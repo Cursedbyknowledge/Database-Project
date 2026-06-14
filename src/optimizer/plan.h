@@ -15,7 +15,6 @@ See the Mulan PSL v2 for more details. */
 #include <memory>
 #include <string>
 #include <vector>
-#include <map>
 #include "parser/ast.h"
 
 #include "parser/parser.h"
@@ -53,10 +52,6 @@ class Plan
 public:
     PlanTag tag;
     virtual ~Plan() = default;
-    
-    // EXPLAIN ANALYZE: 序列化计划树 + 运行时行数
-    virtual void explain(int indent, const std::map<const Plan*, int>& rows_map,
-                         std::string& out) const {}
 };
 
 class ScanPlan : public Plan
@@ -75,42 +70,6 @@ class ScanPlan : public Plan
         
         }
         ~ScanPlan(){}
-        void explain(int indent, const std::map<const Plan*, int>& rows_map,
-                     std::string& out) const override {
-            int rows = rows_map.count(this) ? rows_map.at(this) : 0;
-            // 如果有过滤条件，先输出Filter节点
-            if (!fed_conds_.empty()) {
-                out += std::string(indent, '\t');
-                out += "Filter(condition=[";
-                for (size_t i = 0; i < fed_conds_.size(); i++) {
-                    if(i) out += ", ";
-                    auto &c = fed_conds_[i];
-                    out += c.lhs_col.tab_name + "." + c.lhs_col.col_name;
-                    // op
-                    switch(c.op) {
-                        case OP_EQ: out += "="; break;
-                        case OP_NE: out += "<>"; break;
-                        case OP_LT: out += "<"; break;
-                        case OP_GT: out += ">"; break;
-                        case OP_LE: out += "<="; break;
-                        case OP_GE: out += ">="; break;
-                    }
-                    if (c.is_rhs_val) {
-                        if (c.rhs_val.type == TYPE_INT)
-                            out += std::to_string(*(int*)c.rhs_val.raw->data);
-                        else if (c.rhs_val.type == TYPE_FLOAT)
-                            out += std::to_string(*(float*)c.rhs_val.raw->data);
-                        else out += c.rhs_val.str_val;
-                    }
-                }
-                out += "], rows=" + std::to_string(rows) + ")\n";
-                indent++;
-            }
-            out += std::string(indent, '\t');
-            out += "Scan(table=" + tab_name_ + ", type=";
-            out += (tag == T_IndexScan ? "IndexScan" : "SeqScan") + std::string(", rows=");
-            out += std::to_string(rows) + ")\n";
-        }
         // 以下变量同ScanExecutor中的变量
         std::string tab_name_;                     
         std::vector<ColMeta> cols_;                
@@ -133,37 +92,6 @@ class JoinPlan : public Plan
             type = INNER_JOIN;
         }
         ~JoinPlan(){}
-        void explain(int indent, const std::map<const Plan*, int>& rows_map,
-                     std::string& out) const override {
-            int rows = rows_map.count(this) ? rows_map.at(this) : 0;
-            out += std::string(indent, '\t');
-            out += "Join(";
-            // 递归收集表名（不用std::function，避免引入<functional>头文件）
-            std::vector<std::string> tabs;
-            collect_join_tables(left_, tabs);
-            collect_join_tables(right_, tabs);
-            out += "tables=[";
-            for (size_t i = 0; i < tabs.size(); i++) { if(i) out += ", "; out += tabs[i]; }
-            out += "], condition=[";
-            for (size_t i = 0; i < conds_.size(); i++) {
-                if(i) out += ", ";
-                out += conds_[i].lhs_col.tab_name + "." + conds_[i].lhs_col.col_name;
-                out += "=";
-                out += conds_[i].rhs_col.tab_name + "." + conds_[i].rhs_col.col_name;
-            }
-            out += "], rows=" + std::to_string(rows) + ")\n";
-            left_->explain(indent + 1, rows_map, out);
-            right_->explain(indent + 1, rows_map, out);
-        }
-        // 递归收集Join树中的所有表名
-        static void collect_join_tables(const std::shared_ptr<Plan>& p, std::vector<std::string>& tabs) {
-            if (auto s = std::dynamic_pointer_cast<ScanPlan>(p)) {
-                tabs.push_back(s->tab_name_);
-            } else if (auto j = std::dynamic_pointer_cast<JoinPlan>(p)) {
-                collect_join_tables(j->left_, tabs);
-                collect_join_tables(j->right_, tabs);
-            }
-        }
         // 左节点
         std::shared_ptr<Plan> left_;
         // 右节点
@@ -184,22 +112,6 @@ class ProjectionPlan : public Plan
             sel_cols_ = std::move(sel_cols);
         }
         ~ProjectionPlan(){}
-        void explain(int indent, const std::map<const Plan*, int>& rows_map,
-                     std::string& out) const override {
-            int rows = rows_map.count(this) ? rows_map.at(this) : 0;
-            out += std::string(indent, '\t');
-            out += "Project(columns=[";
-            if (sel_cols_.empty() || (sel_cols_.size()==1 && sel_cols_[0].col_name=="*")) {
-                out += "*";
-            } else {
-                for (size_t i = 0; i < sel_cols_.size(); i++) {
-                    if(i) out += ", ";
-                    out += sel_cols_[i].tab_name + "." + sel_cols_[i].col_name;
-                }
-            }
-            out += "], rows=" + std::to_string(rows) + ")\n";
-            subplan_->explain(indent + 1, rows_map, out);
-        }
         std::shared_ptr<Plan> subplan_;
         std::vector<TabCol> sel_cols_;
         

@@ -10,6 +10,8 @@ See the Mulan PSL v2 for more details. */
 
 #include "execution_manager.h"
 
+#include <map>
+
 #include "executor_delete.h"
 #include "executor_index_scan.h"
 #include "executor_insert.h"
@@ -216,6 +218,71 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     RecordPrinter::print_record_count(num_rec, context);
 }
 
+// 自由函数：序列化计划树（替代Plan::explain虚函数，避免vtable变更）
+static void explain_plan(std::shared_ptr<Plan> p, int indent,
+                         const std::map<const Plan*, int>& rows_map, std::string& out) {
+    int rows = rows_map.count(p.get()) ? rows_map.at(p.get()) : 0;
+    if (auto sp = std::dynamic_pointer_cast<ScanPlan>(p)) {
+        if (!sp->fed_conds_.empty()) {
+            out += std::string(indent, '\t') + "Filter(condition=[";
+            for (size_t i = 0; i < sp->fed_conds_.size(); i++) {
+                if (i) out += ", ";
+                auto &c = sp->fed_conds_[i];
+                out += c.lhs_col.tab_name + "." + c.lhs_col.col_name;
+                switch (c.op) {
+                    case OP_EQ: out += "="; break; case OP_NE: out += "<>"; break;
+                    case OP_LT: out += "<"; break; case OP_GT: out += ">"; break;
+                    case OP_LE: out += "<="; break; case OP_GE: out += ">="; break;
+                }
+                if (c.is_rhs_val) {
+                    if (c.rhs_val.type == TYPE_INT) out += std::to_string(*(int*)c.rhs_val.raw->data);
+                    else if (c.rhs_val.type == TYPE_FLOAT) out += std::to_string(*(float*)c.rhs_val.raw->data);
+                    else out += c.rhs_val.str_val;
+                }
+            }
+            out += "], rows=" + std::to_string(rows) + ")\n";
+            indent++;
+        }
+        out += std::string(indent, '\t') + "Scan(table=" + sp->tab_name_ + ", type=";
+        out += std::string(sp->tag == T_IndexScan ? "IndexScan" : "SeqScan") + ", rows=";
+        out += std::to_string(rows) + ")\n";
+    } else if (auto jp = std::dynamic_pointer_cast<JoinPlan>(p)) {
+        out += std::string(indent, '\t') + "Join(";
+        out += "tables=[";
+        bool first = true;
+        auto collect = [&](auto self, std::shared_ptr<Plan> cp) -> void {
+            if (auto s = std::dynamic_pointer_cast<ScanPlan>(cp)) {
+                if (!first) out += ", "; first = false;
+                out += s->tab_name_;
+            } else if (auto j = std::dynamic_pointer_cast<JoinPlan>(cp)) {
+                self(self, j->left_); self(self, j->right_);
+            }
+        };
+        collect(collect, jp->left_); collect(collect, jp->right_);
+        out += "], condition=[";
+        for (size_t i = 0; i < jp->conds_.size(); i++) {
+            if (i) out += ", ";
+            out += jp->conds_[i].lhs_col.tab_name + "." + jp->conds_[i].lhs_col.col_name;
+            out += "=" + jp->conds_[i].rhs_col.tab_name + "." + jp->conds_[i].rhs_col.col_name;
+        }
+        out += "], rows=" + std::to_string(rows) + ")\n";
+        explain_plan(jp->left_, indent + 1, rows_map, out);
+        explain_plan(jp->right_, indent + 1, rows_map, out);
+    } else if (auto pp = std::dynamic_pointer_cast<ProjectionPlan>(p)) {
+        out += std::string(indent, '\t') + "Project(columns=[";
+        if (pp->sel_cols_.empty() || (pp->sel_cols_.size() == 1 && pp->sel_cols_[0].col_name == "*")) {
+            out += "*";
+        } else {
+            for (size_t i = 0; i < pp->sel_cols_.size(); i++) {
+                if (i) out += ", ";
+                out += pp->sel_cols_[i].tab_name + "." + pp->sel_cols_[i].col_name;
+            }
+        }
+        out += "], rows=" + std::to_string(rows) + ")\n";
+        explain_plan(pp->subplan_, indent + 1, rows_map, out);
+    }
+}
+
 // EXPLAIN ANALYZE: 执行计划并输出计划树到 output.txt
 void QlManager::explain_select(std::shared_ptr<Plan> plan,
                                 std::unique_ptr<AbstractExecutor> executorTreeRoot,
@@ -225,20 +292,19 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
         executorTreeRoot->Next();
     }
     
-    // 生成EXPLAIN树
+    // 生成EXPLAIN树（自由函数，不修改Plan类vtable）
     std::map<const Plan*, int> rows_map;
     std::string out;
-    plan->explain(0, rows_map, out);
+    explain_plan(plan, 0, rows_map, out);
     
     // 发送给客户端
     memcpy(context->data_send_, out.c_str(), std::min(out.size(), (size_t)BUFFER_LENGTH - 1));
     context->data_send_[std::min(out.size(), (size_t)BUFFER_LENGTH - 1)] = '\0';
     *(context->offset_) = out.size();
     
-    // 核心修复：动态获取数据库名称，拼接测评机检查的真实路径
+    // 写入 output.txt
     std::string db_name = sm_manager_->get_db_name();
     std::string out_path = db_name.empty() ? "output.txt" : (db_name + "/output.txt");
-
     std::fstream outfile;
     outfile.open(out_path, std::ios::out | std::ios::app);
     if (!outfile.is_open()) {
