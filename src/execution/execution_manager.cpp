@@ -163,9 +163,8 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     rec_printer.print_separator(context);
     rec_printer.print_record(captions, context);
     rec_printer.print_separator(context);
-    // print header into file (CI 从 build/ 启动，故 db_name/output.txt 正确)
-    std::string db_name = sm_manager_->get_db_name();
-    std::string out_path = db_name + "/output.txt";
+    // print header into file (open_db已chdir到数据库目录，直接写output.txt即可)
+    std::string out_path = "output.txt";
     std::fstream outfile;
     outfile.open(out_path, std::ios::out | std::ios::app);
     if (!outfile.is_open()) {
@@ -230,9 +229,8 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
     memcpy(context->data_send_, out.c_str(), std::min(out.size(), (size_t)BUFFER_LENGTH - 1));
     context->data_send_[std::min(out.size(), (size_t)BUFFER_LENGTH - 1)] = '\0';
     *(context->offset_) = out.size();
-    // 写入数据库目录下的 output.txt
-    std::string db_name = sm_manager_->get_db_name();
-    std::string out_path = db_name + "/output.txt";
+    // 写入数据库目录下的 output.txt（open_db已chdir，直接写即可）
+    std::string out_path = "output.txt";
     std::fstream outfile;
     outfile.open(out_path, std::ios::out | std::ios::app);
     if (!outfile.is_open()) {
