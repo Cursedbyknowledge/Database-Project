@@ -106,8 +106,8 @@ check("Index maintain range", r, ["500", "lastdanc", "507", "asdfhjkl"])
 s.close()
 time.sleep(0.5)
 
-# output.txt 在CWD（open_db不chdir，所有文件在启动目录）
-op = 'output.txt'
+# output.txt 在数据库目录下（open_db执行chdir）
+op = os.path.join(DB, 'output.txt')
 print(f"\noutput.txt: {'EXISTS' if os.path.exists(op) else 'MISSING'}")
 if os.path.exists(op):
     fc = open(op).read().count('failure')
