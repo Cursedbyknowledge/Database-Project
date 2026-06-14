@@ -113,11 +113,9 @@ void IxNodeHandle::insert_pairs(int pos, const char *key, const Rid *rid, int n)
  * @return int 键值对数量
  */
 int IxNodeHandle::insert(const char *key, const Rid &value) {
-    int pos = lower_bound(key);
-    if (pos < page_hdr->num_key &&
-        ix_compare(get_key(pos), key, file_hdr->col_types_, file_hdr->col_lens_) == 0) {
-        return page_hdr->num_key;
-    }
+    // B+树叶子节点允许重复键：不同的RID可以有相同的key值
+    // 使用 upper_bound 确保新插入的重复键放在已有相同键之后
+    int pos = upper_bound(key);
     insert_pair(pos, key, value);
     return page_hdr->num_key;
 }
@@ -303,13 +301,7 @@ page_id_t IxIndexHandle::insert_entry(const char *key, const Rid &value, Transac
         return new_root->get_page_no();
     }
     auto [leaf, _] = find_leaf_page(key, Operation::INSERT, transaction);
-    int old_size = leaf->get_size();
     int new_size = leaf->insert(key, value);
-    // 唯一索引约束检查：如果插入前后size不变，说明key已存在
-    if (new_size == old_size) {
-        buffer_pool_manager_->unpin_page(leaf->get_page_id(), false);
-        throw DuplicateIndexError("", "");
-    }
     if (new_size >= leaf->get_max_size()) {
         IxNodeHandle *new_leaf = split(leaf);
         if (file_hdr_->root_page_ == leaf->get_page_no()) {
