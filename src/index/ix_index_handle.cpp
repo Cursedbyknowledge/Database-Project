@@ -309,6 +309,13 @@ page_id_t IxIndexHandle::insert_entry(const char *key, const Rid &value, Transac
         return new_root->get_page_no();
     }
     auto [leaf, _] = find_leaf_page(key, Operation::INSERT, transaction);
+    // 唯一索引约束：检查键值是否已存在
+    int pos = leaf->lower_bound(key);
+    if (pos < leaf->get_size() &&
+        ix_compare(leaf->get_key(pos), key, file_hdr_->col_types_, file_hdr_->col_lens_) == 0) {
+        buffer_pool_manager_->unpin_page(leaf->get_page_id(), false);
+        throw DuplicateIndexError("", "");
+    }
     int new_size = leaf->insert(key, value);
     if (new_size >= leaf->get_max_size()) {
         IxNodeHandle *new_leaf = split(leaf);
