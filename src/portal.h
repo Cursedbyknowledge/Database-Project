@@ -30,7 +30,8 @@ typedef enum portalTag{
     PORTAL_ONE_SELECT,
     PORTAL_DML_WITHOUT_SELECT,
     PORTAL_MULTI_QUERY,
-    PORTAL_CMD_UTILITY
+    PORTAL_CMD_UTILITY,
+    PORTAL_EXPLAIN
 } portalTag;
 
 
@@ -71,7 +72,8 @@ class Portal
                 {
                     std::shared_ptr<ProjectionPlan> p = std::dynamic_pointer_cast<ProjectionPlan>(x->subplan_);
                     std::unique_ptr<AbstractExecutor> root= convert_plan_executor(p, context);
-                    return std::make_shared<PortalStmt>(PORTAL_ONE_SELECT, std::move(p->sel_cols_), std::move(root), plan);
+                    portalTag tag = context->explain_ ? PORTAL_EXPLAIN : PORTAL_ONE_SELECT;
+                    return std::make_shared<PortalStmt>(tag, std::move(p->sel_cols_), std::move(root), plan);
                 }
                     
                 case T_Update:
@@ -122,6 +124,13 @@ class Portal
             case PORTAL_ONE_SELECT:
             {
                 ql->select_from(std::move(portal->root), std::move(portal->sel_cols), context);
+                break;
+            }
+            case PORTAL_EXPLAIN:
+            {
+                auto dml = std::dynamic_pointer_cast<DMLPlan>(portal->plan);
+                auto proj = dml ? dml->subplan_ : portal->plan;
+                ql->explain_select(proj, std::move(portal->root), std::move(portal->sel_cols), context);
                 break;
             }
 
