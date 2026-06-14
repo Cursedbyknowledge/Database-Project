@@ -38,13 +38,14 @@ class ProjectionExecutor : public AbstractExecutor {
         len_ = curr_offset;
     }
 
-    void beginTuple() override { prev_->beginTuple(); }
+    void beginTuple() override { rows_ = 0; prev_->beginTuple(); }
 
     void nextTuple() override { prev_->nextTuple(); }
 
     std::unique_ptr<RmRecord> Next() override {
         auto prev_rec = prev_->Next();
         if (!prev_rec) return nullptr;
+        rows_++;  // 计数投影输出行
         auto proj_rec = std::make_unique<RmRecord>(len_);
         for (size_t i = 0; i < sel_idxs_.size(); i++) {
             auto& col = cols_[i];
@@ -60,4 +61,6 @@ class ProjectionExecutor : public AbstractExecutor {
     size_t tupleLen() const override { return len_; }
 
     Rid &rid() override { return _abstract_rid; }
+
+    std::vector<AbstractExecutor*> sub_executors() override { return {prev_.get()}; }
 };

@@ -209,6 +209,39 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     RecordPrinter::print_record_count(num_rec, context);
 }
 
+// EXPLAIN ANALYZE: 执行计划并输出计划树 + 行数
+void QlManager::explain_select(std::shared_ptr<Plan> plan,
+                                std::unique_ptr<AbstractExecutor> executorTreeRoot,
+                                std::vector<TabCol> sel_cols, Context *context) {
+    // 执行查询计划
+    for (executorTreeRoot->beginTuple(); !executorTreeRoot->is_end(); executorTreeRoot->nextTuple()) {
+        executorTreeRoot->Next();
+    }
+    // 递归收集行数：同时遍历计划树和执行器树
+    std::map<const Plan*, int> rows_map;
+    std::function<void(std::shared_ptr<Plan>, AbstractExecutor*)> collect;
+    collect = [&](std::shared_ptr<Plan> p, AbstractExecutor *exec) {
+        if (!p || !exec) return;
+        rows_map[p.get()] = exec->rows_;
+        auto subs = exec->sub_executors();
+        if (auto pp = std::dynamic_pointer_cast<ProjectionPlan>(p)) {
+            if (!subs.empty()) collect(pp->subplan_, subs[0]);
+        } else if (auto jp = std::dynamic_pointer_cast<JoinPlan>(p)) {
+            if (subs.size() >= 2) {
+                collect(jp->left_, subs[0]);
+                collect(jp->right_, subs[1]);
+            }
+        }
+    };
+    collect(plan, executorTreeRoot.get());
+    // 输出EXPLAIN树
+    std::string out;
+    plan->explain(0, rows_map, out);
+    memcpy(context->data_send_, out.c_str(), std::min(out.size(), (size_t)BUFFER_LENGTH - 1));
+    context->data_send_[std::min(out.size(), (size_t)BUFFER_LENGTH - 1)] = '\0';
+    *(context->offset_) = out.size();
+}
+
 // 执行DML语句
 void QlManager::run_dml(std::unique_ptr<AbstractExecutor> exec){
     exec->Next();

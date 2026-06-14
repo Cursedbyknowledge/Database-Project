@@ -45,6 +45,7 @@ class SeqScanExecutor : public AbstractExecutor {
     }
 
     void beginTuple() override {
+        rows_ = 0;
         scan_ = std::make_unique<RmScan>(fh_);
     }
 
@@ -54,6 +55,7 @@ class SeqScanExecutor : public AbstractExecutor {
 
     std::unique_ptr<RmRecord> Next() override {
         if (scan_->is_end()) return nullptr;
+        rows_++;  // 计数扫描行数
         rid_ = scan_->rid();
         auto rec = fh_->get_record(rid_, context_);
         if (rec == nullptr) return nullptr;
