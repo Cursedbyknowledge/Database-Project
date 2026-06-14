@@ -267,7 +267,7 @@ void SmManager::create_index(const std::string& tab_name, const std::vector<std:
     // 打开索引文件
     auto ix_name = ix_manager_->get_index_name(tab_name, index_cols);
     auto ih = ix_manager_->open_index(tab_name, index_cols);
-    // 扫描表中已有记录，收集(key,rid)对，排序后直接构建B+树
+    // 扫描表中已有记录，排序后插入索引
     auto fh = fhs_.at(tab_name).get();
     std::vector<std::pair<std::string, Rid>> entries;
     for (RmScan scan(fh); !scan.is_end(); scan.next()) {
@@ -286,8 +286,10 @@ void SmManager::create_index(const std::string& tab_name, const std::vector<std:
         [&](const auto &a, const auto &b) {
             return memcmp(a.first.data(), b.first.data(), col_tot_len) < 0;
         });
-    // 直接构建B+树(绕过insert_entry/split框架bug)
-    ih->build_from_sorted(entries);
+    // 插入索引（TODO: 后续改用 build_from_sorted 绕过 insert_entry 分裂bug）
+    for (auto &[key_str, rid] : entries) {
+        ih->insert_entry(key_str.c_str(), rid, context ? context->txn_ : nullptr);
+    }
     ihs_.emplace(ix_name, std::move(ih));
     // 标记列上有索引
     for (auto &col_name : col_names) {
