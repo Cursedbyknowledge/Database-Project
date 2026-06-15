@@ -178,6 +178,10 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
         }
         rec_printer.print_record(columns, context);
         num_rec++;
+        if (num_rec > 100000) {  // 安全阀：防止无限循环耗尽内存
+            std::cerr << "WARNING: select_from loop exceeded 100000 records, breaking" << std::endl;
+            break;
+        }
     }
     
     rec_printer.print_separator(context);
@@ -303,8 +307,13 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
                                 std::vector<TabCol> sel_cols, Context *context) {
     int old_offset = *(context->offset_);
 
+    int safety = 0;
     for (executorTreeRoot->beginTuple(); !executorTreeRoot->is_end(); executorTreeRoot->nextTuple()) {
         executorTreeRoot->Next();
+        if (++safety > 100000) {
+            std::cerr << "WARNING: explain_select loop exceeded 100000, breaking" << std::endl;
+            break;
+        }
     }
     
     std::map<const Plan*, int> rows_map, out_rows_map;
