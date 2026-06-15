@@ -326,11 +326,14 @@ std::shared_ptr<Plan> Planner::make_one_rel(std::shared_ptr<Query> query)
         scantbl[0] = 1;
     }
 
-    //连接剩余表
+    //连接剩余表（保留已有conds，不倒空）
     for (size_t i = 0; i < tables.size(); i++) {
         if(scantbl[i] == -1) {
+            auto existing_conds = (table_join_executors) 
+                ? (std::dynamic_pointer_cast<JoinPlan>(table_join_executors))->conds_
+                : std::vector<Condition>();
             table_join_executors = std::make_shared<JoinPlan>(T_NestLoop, std::move(table_scan_executors[i]), 
-                                                    std::move(table_join_executors), std::vector<Condition>());
+                                                    std::move(table_join_executors), std::move(existing_conds));
         }
     }
 

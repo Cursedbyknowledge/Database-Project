@@ -45,6 +45,8 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     }
 
     void beginTuple() override {
+        runtime_rows_ = 0;
+        runtime_output_ = 0;
         left_->beginTuple();
     }
 
@@ -72,7 +74,8 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
                         }
                     }
                     if (match) {
-                        runtime_rows_++;  // Join rows: 连接输出的行数
+                        runtime_rows_++;   // Join rows: 连接输出的行数
+                        runtime_output_++; // 同
                         isend_ = false;
                         return;
                     }

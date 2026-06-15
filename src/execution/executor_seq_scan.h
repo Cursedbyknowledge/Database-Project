@@ -46,6 +46,8 @@ class SeqScanExecutor : public AbstractExecutor {
 
     void beginTuple() override {
         scan_ = std::make_unique<RmScan>(fh_);
+        runtime_rows_ = 0;
+        runtime_output_ = 0;
     }
 
     void nextTuple() override {

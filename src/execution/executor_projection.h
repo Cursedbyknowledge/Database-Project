@@ -38,14 +38,15 @@ class ProjectionExecutor : public AbstractExecutor {
         len_ = curr_offset;
     }
 
-    void beginTuple() override { prev_->beginTuple(); }
+    void beginTuple() override { runtime_rows_ = 0; runtime_output_ = 0; prev_->beginTuple(); }
 
     void nextTuple() override { prev_->nextTuple(); }
 
     std::unique_ptr<RmRecord> Next() override {
         auto prev_rec = prev_->Next();
         if (!prev_rec) return nullptr;
-        runtime_rows_++;  // Project/Filter rows: 过滤/投影后的行数
+        runtime_rows_++;  // Project rows: 投影输出行数
+        runtime_output_++;
         auto proj_rec = std::make_unique<RmRecord>(len_);
         for (size_t i = 0; i < sel_idxs_.size(); i++) {
             auto& col = cols_[i];
