@@ -141,16 +141,12 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
                             Context *context) {
     int old_offset = *(context->offset_);
 
+    // 列名始终从执行器获取，保证与数据列顺序一致
+    // ProjectionExecutor已为非SELECT*查询按用户指定顺序重排列
+    // SELECT*时保持NLJ/Scan的实际列顺序
     std::vector<std::string> captions;
-    // SELECT *：从执行器获取真实列名
-    if (sel_cols.size() == 1 && sel_cols[0].col_name == "*") {
-        for (auto &col : executorTreeRoot->cols()) {
-            captions.push_back(col.name);
-        }
-    } else {
-        for (auto &sel_col : sel_cols) {
-            captions.push_back(sel_col.col_name);
-        }
+    for (auto &col : executorTreeRoot->cols()) {
+        captions.push_back(col.name);
     }
 
     // Print header into buffer
