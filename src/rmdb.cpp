@@ -282,9 +282,8 @@ int main(int argc, char **argv) {
                      "Welcome to RMDB!\n"
                      "Type 'help;' for help.\n"
                      "\n";
-        // 数据库路径：绝对路径直接使用，相对路径强制放在 build/ 下
-        std::string db_name = argv[1];
-        std::string db_path = (db_name[0] == '/') ? db_name : ("build/" + db_name);
+        // 数据库路径
+        std::string db_path = argv[1];
         if (!sm_manager->is_dir(db_path)) {
             sm_manager->create_db(db_path);
         }
