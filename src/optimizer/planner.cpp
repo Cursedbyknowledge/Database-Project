@@ -296,12 +296,22 @@ std::shared_ptr<Plan> Planner::make_one_rel(std::shared_ptr<Query> query)
                 isneedreverse = true;
             } 
 
+            // 辅助：从新ScanPlan获取表名
+            auto get_tab_name = [](std::shared_ptr<Plan> p) -> std::string {
+                if (auto sp = std::dynamic_pointer_cast<ScanPlan>(p)) return sp->tab_name_;
+                return "";
+            };
             if(left_need_to_join_executors != nullptr && right_need_to_join_executors != nullptr) {
-                // 两表直接join：当前条件 + 合并左右已有cond
+                // 两表直接join：当前条件 + 仅合并与这两个新表相关的已有cond
                 std::vector<Condition> merged_conds{*it};
-                // 收集table_join_executors中已有的join条件
+                std::string tab_a = get_tab_name(left_need_to_join_executors);
+                std::string tab_b = get_tab_name(right_need_to_join_executors);
                 if (auto existing_jp = std::dynamic_pointer_cast<JoinPlan>(table_join_executors)) {
-                    merged_conds.insert(merged_conds.end(), existing_jp->conds_.begin(), existing_jp->conds_.end());
+                    for (auto &ec : existing_jp->conds_) {
+                        if (ec.lhs_col.tab_name == tab_a || ec.lhs_col.tab_name == tab_b ||
+                            ec.rhs_col.tab_name == tab_a || ec.rhs_col.tab_name == tab_b)
+                            merged_conds.push_back(ec);
+                    }
                 }
                 table_join_executors = std::make_shared<JoinPlan>(T_NestLoop, 
                                                                     std::move(left_need_to_join_executors), 
@@ -316,10 +326,14 @@ std::shared_ptr<Plan> Planner::make_one_rel(std::shared_ptr<Query> query)
                     it->op = swap_op.at(it->op);
                     left_need_to_join_executors = std::move(right_need_to_join_executors);
                 }
-                // 单表join：当前条件 + 合并已有cond
+                // 单表join：当前条件 + 仅合并与新表相关的已有cond
                 std::vector<Condition> merged_conds{*it};
+                std::string new_tab = get_tab_name(left_need_to_join_executors);
                 if (auto existing_jp = std::dynamic_pointer_cast<JoinPlan>(table_join_executors)) {
-                    merged_conds.insert(merged_conds.end(), existing_jp->conds_.begin(), existing_jp->conds_.end());
+                    for (auto &ec : existing_jp->conds_) {
+                        if (ec.lhs_col.tab_name == new_tab || ec.rhs_col.tab_name == new_tab)
+                            merged_conds.push_back(ec);
+                    }
                 }
                 table_join_executors = std::make_shared<JoinPlan>(T_NestLoop, std::move(left_need_to_join_executors), 
                                                                     std::move(table_join_executors), std::move(merged_conds));
