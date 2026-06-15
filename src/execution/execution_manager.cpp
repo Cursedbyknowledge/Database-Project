@@ -243,7 +243,17 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
             indent++;
         }
         out += std::string(indent, '\t') + "Scan(table=" + sp->tab_name_ + ", type=";
-        out += std::string(sp->tag == T_IndexScan ? "IndexScan" : "SeqScan") + ", rows=";
+        if (sp->tag == T_IndexScan) {
+            out += "IndexScan, using_index=(";
+            auto& idx_cols = sp->index_col_names_;
+            for (size_t i = 0; i < idx_cols.size(); i++) {
+                if (i) out += ", ";
+                out += idx_cols[i];
+            }
+            out += "), rows=";
+        } else {
+            out += "SeqScan, rows=";
+        }
         out += std::to_string(rows) + ")\n";
     } else if (auto jp = std::dynamic_pointer_cast<JoinPlan>(p)) {
         out += std::string(indent, '\t') + "Join(";
