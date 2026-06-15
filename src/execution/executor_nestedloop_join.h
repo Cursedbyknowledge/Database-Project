@@ -55,14 +55,14 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         }
         if (right_->is_end() || !right_record_) {
             right_->beginTuple();
+            left_record_ = left_->Next();  // 外表每轮只读一次
         } else {
             right_->nextTuple();
         }
-        while (!left_->is_end()) {
+        while (left_record_ && !left_->is_end()) {
             while (!right_->is_end()) {
-                left_record_ = left_->Next();
                 right_record_ = right_->Next();
-                if (left_record_ && right_record_) {
+                if (right_record_) {
                     bool match = true;
                     for (auto& cond : fed_conds_) {
                         if (!eval_cond_join(left_record_->data, right_record_->data, cond,
@@ -72,8 +72,8 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
                         }
                     }
                     if (match) {
-                        runtime_rows_++;   // Join rows: 连接输出的行数
-                        runtime_output_++; // 同
+                        runtime_rows_++;
+                        runtime_output_++;
                         isend_ = false;
                         return;
                     }
@@ -83,6 +83,9 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
             left_->nextTuple();
             if (!left_->is_end()) {
                 right_->beginTuple();
+                left_record_ = left_->Next();
+            } else {
+                left_record_ = nullptr;
             }
         }
         isend_ = true;
