@@ -42,6 +42,10 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
                     rhs_col->tab_name = x->alias_map[rhs_col->tab_name];
             }
         }
+        // 构建反向别名映射 (real_name -> alias_name) 供EXPLAIN输出
+        for (auto &[alias, real] : x->alias_map) {
+            query->rev_alias_map_[real] = alias;
+        }
 
         // 处理target list，再target list中添加上表名，例如 a.id
         for (auto &sv_sel_col : x->cols) {

@@ -9,8 +9,11 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
 #include "execution_manager.h"
-#include <map>
+#include <algorithm>
 #include <fstream>
+#include <iomanip>
+#include <map>
+#include <sstream>
 #include "executor_delete.h"
 #include "executor_index_scan.h"
 #include "executor_insert.h"
@@ -194,9 +197,15 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
 static void explain_plan(std::shared_ptr<Plan> p, int indent,
                          const std::map<const Plan*, int>& rows_map,
                          const std::map<const Plan*, int>& out_rows_map,
-                         std::string& out) {
+                         std::string& out,
+                         const std::map<std::string, std::string>& alias_map) {
     int rows = rows_map.count(p.get()) ? rows_map.at(p.get()) : 0;
     int out_rows = out_rows_map.count(p.get()) ? out_rows_map.at(p.get()) : rows;
+    // 别名查找：若有别名则用别名，否则用原表名
+    auto alias_for = [&](const std::string& real) -> std::string {
+        auto it = alias_map.find(real);
+        return (it != alias_map.end()) ? it->second : real;
+    };
     
     if (auto sp = std::dynamic_pointer_cast<ScanPlan>(p)) {
         if (!sp->fed_conds_.empty()) {
@@ -209,7 +218,7 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
             for (size_t i = 0; i < sorted_conds.size(); i++) {
                 if (i) out += ", ";
                 auto &c = sorted_conds[i];
-                out += c.lhs_col.tab_name + "." + c.lhs_col.col_name;
+                out += alias_for(c.lhs_col.tab_name) + "." + c.lhs_col.col_name;
                 switch (c.op) {
                     case OP_EQ: out += "="; break; case OP_NE: out += "<>"; break;
                     case OP_LT: out += "<"; break; case OP_GT: out += ">"; break;
@@ -217,7 +226,16 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
                 }
                 if (c.is_rhs_val) {
                     if (c.rhs_val.type == TYPE_INT) out += std::to_string(*(int*)c.rhs_val.raw->data);
-                    else if (c.rhs_val.type == TYPE_FLOAT) out += std::to_string(*(float*)c.rhs_val.raw->data);
+                    else if (c.rhs_val.type == TYPE_FLOAT) {
+                        float fv = *(float*)c.rhs_val.raw->data;
+                        std::ostringstream oss;
+                        oss << std::fixed << std::setprecision(6) << fv;
+                        std::string s = oss.str();
+                        // 去除尾随零
+                        s.erase(s.find_last_not_of('0') + 1, std::string::npos);
+                        if (s.back() == '.') s.pop_back();
+                        out += s;
+                    }
                     else out += c.rhs_val.str_val;
                 }
             }
@@ -233,7 +251,7 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
         std::vector<std::string> tabs;
         auto collect = [&](auto self, std::shared_ptr<Plan> cp) -> void {
             if (auto s = std::dynamic_pointer_cast<ScanPlan>(cp)) tabs.push_back(s->tab_name_);
-            else if (auto pp = std::dynamic_pointer_cast<ProjectionPlan>(cp)) { self(self, pp->subplan_); }
+            else if (auto pp2 = std::dynamic_pointer_cast<ProjectionPlan>(cp)) { self(self, pp2->subplan_); }
             else if (auto j = std::dynamic_pointer_cast<JoinPlan>(cp)) { self(self, j->left_); self(self, j->right_); }
         };
         collect(collect, jp->left_); collect(collect, jp->right_);
@@ -248,12 +266,12 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
         });
         for (size_t i = 0; i < sorted_join_conds.size(); i++) {
             if (i) out += ", ";
-            out += sorted_join_conds[i].lhs_col.tab_name + "." + sorted_join_conds[i].lhs_col.col_name;
-            out += "=" + sorted_join_conds[i].rhs_col.tab_name + "." + sorted_join_conds[i].rhs_col.col_name;
+            out += alias_for(sorted_join_conds[i].lhs_col.tab_name) + "." + sorted_join_conds[i].lhs_col.col_name;
+            out += "=" + alias_for(sorted_join_conds[i].rhs_col.tab_name) + "." + sorted_join_conds[i].rhs_col.col_name;
         }
         out += "], rows=" + std::to_string(rows) + ")\n";
-        explain_plan(jp->left_, indent + 1, rows_map, out_rows_map, out);
-        explain_plan(jp->right_, indent + 1, rows_map, out_rows_map, out);
+        explain_plan(jp->left_, indent + 1, rows_map, out_rows_map, out, alias_map);
+        explain_plan(jp->right_, indent + 1, rows_map, out_rows_map, out, alias_map);
     } else if (auto pp = std::dynamic_pointer_cast<ProjectionPlan>(p)) {
         out += std::string(indent, '\t') + "Project(columns=[";
         if (pp->sel_cols_.empty() || (pp->sel_cols_.size() == 1 && pp->sel_cols_[0].col_name == "*")) {
@@ -265,11 +283,11 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
             });
             for (size_t i = 0; i < cols.size(); i++) {
                 if (i) out += ", ";
-                out += cols[i].tab_name + "." + cols[i].col_name;
+                out += alias_for(cols[i].tab_name) + "." + cols[i].col_name;
             }
         }
         out += "], rows=" + std::to_string(rows) + ")\n";
-        explain_plan(pp->subplan_, indent + 1, rows_map, out_rows_map, out);
+        explain_plan(pp->subplan_, indent + 1, rows_map, out_rows_map, out, alias_map);
     }
 }
 
@@ -302,7 +320,7 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
     collect(plan, executorTreeRoot.get());
     
     std::string out;
-    explain_plan(plan, 0, rows_map, out_rows_map, out);
+    explain_plan(plan, 0, rows_map, out_rows_map, out, context->rev_alias_map_);
     
     int write_len = std::min(out.size(), (size_t)BUFFER_LENGTH - 1 - old_offset);
     memcpy(context->data_send_ + old_offset, out.c_str(), write_len);

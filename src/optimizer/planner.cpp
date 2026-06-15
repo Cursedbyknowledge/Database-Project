@@ -429,6 +429,8 @@ static std::shared_ptr<Plan> pushdown_projection_impl(
 }
 
 std::shared_ptr<Plan> Planner::generate_select_plan(std::shared_ptr<Query> query, Context *context) {
+    // 保存反向别名映射到context，供EXPLAIN输出使用
+    context->rev_alias_map_ = query->rev_alias_map_;
     //逻辑优化
     query = logical_optimization(std::move(query), context);
 

@@ -12,6 +12,7 @@ See the Mulan PSL v2 for more details. */
 
 #include <cassert>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -34,6 +35,8 @@ class Query{
     std::vector<SetClause> set_clauses;
     //insert 的values值
     std::vector<Value> values;
+    // 反向别名映射: real_table_name -> alias_name (用于EXPLAIN输出)
+    std::map<std::string, std::string> rev_alias_map_;
 
     Query(){}
 

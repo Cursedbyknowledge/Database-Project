@@ -10,6 +10,9 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
+#include <map>
+#include <string>
+
 #include "transaction/transaction.h"
 #include "transaction/concurrency/lock_manager.h"
 #include "recovery/log_manager.h"
@@ -37,4 +40,6 @@ public:
     int *offset_;
     bool ellipsis_;
     bool explain_;
+    // 反向别名映射 (real_table_name -> alias_name)，供EXPLAIN输出使用
+    std::map<std::string, std::string> rev_alias_map_;
 };
