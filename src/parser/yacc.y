@@ -3,6 +3,7 @@
 #include "yacc.tab.h"
 #include <iostream>
 #include <memory>
+#include <map>
 
 int yylex(YYSTYPE *yylval, YYLTYPE *yylloc);
 
@@ -11,8 +12,9 @@ void yyerror(YYLTYPE *locp, const char* s) {
 }
 
 using namespace ast;
-// 全局变量：暂存JOIN ON条件，供SELECT规则合并到WHERE条件中
+// 全局变量：暂存JOIN ON条件和别名映射，供SELECT规则合并
 static std::vector<std::shared_ptr<BinaryExpr>> g_join_on_conds;
+static std::map<std::string, std::string> g_alias_map_;
 %}
 
 %define api.pure full
@@ -186,6 +188,7 @@ dml:
         g_join_on_conds.clear();
         auto sel = std::make_shared<SelectStmt>($2, $4, merged_conds, $6);
         if ($7 > 0) sel->limit_val = $7;
+        sel->alias_map = g_alias_map_; g_alias_map_.clear();
         $$ = sel;
     }
     |   SELECT agg_selector FROM tableList optWhereClause opt_group_clause optHavingClause opt_order_clause opt_limit
@@ -195,6 +198,7 @@ dml:
         g_join_on_conds.clear();
         auto sel = std::make_shared<SelectStmt>($2, $4, merged_conds, $8);
         if ($9 > 0) sel->limit_val = $9;
+        sel->alias_map = g_alias_map_; g_alias_map_.clear();
         $$ = sel;
     }
     |   EXPLAIN ANALYZE SELECT selector FROM tableList optWhereClause opt_order_clause
@@ -204,6 +208,7 @@ dml:
         g_join_on_conds.clear();
         auto sel = std::make_shared<SelectStmt>($4, $6, merged_conds, $8);
         sel->explain_analyze = true;
+        sel->alias_map = g_alias_map_; g_alias_map_.clear();
         $$ = sel;
     }
     |   EXPLAIN ANALYZE SELECT agg_selector FROM tableList optWhereClause opt_group_clause optHavingClause opt_order_clause
@@ -213,6 +218,7 @@ dml:
         g_join_on_conds.clear();
         auto sel = std::make_shared<SelectStmt>($4, $6, merged_conds, $10);
         sel->explain_analyze = true;
+        sel->alias_map = g_alias_map_; g_alias_map_.clear();
         $$ = sel;
     }
     ;
@@ -501,19 +507,39 @@ tableList:
     {
         $$ = std::vector<std::string>{$1};
     }
+    |   tbName IDENTIFIER
+    {
+        $$ = std::vector<std::string>{$1};  // tabs存真实表名
+        g_alias_map_[$2] = $1;
+    }
     |   tableList ',' tbName
     {
         $$.push_back($3);
+    }
+    |   tableList ',' tbName IDENTIFIER
+    {
+        $$.push_back($3);  // tabs存真实表名
+        g_alias_map_[$4] = $3;
     }
     |   tableList JOIN tbName
     {
         $$.push_back($3);
     }
+    |   tableList JOIN tbName IDENTIFIER
+    {
+        $$.push_back($3);  // tabs存真实表名
+        g_alias_map_[$4] = $3;
+    }
     |   tableList JOIN tbName ON whereClause
     {
         $$.push_back($3);
-        // 保存ON条件，稍后合并到SELECT的WHERE条件中
         g_join_on_conds.insert(g_join_on_conds.end(), $5.begin(), $5.end());
+    }
+    |   tableList JOIN tbName IDENTIFIER ON whereClause
+    {
+        $$.push_back($3);  // tabs存真实表名
+        g_alias_map_[$4] = $3;
+        g_join_on_conds.insert(g_join_on_conds.end(), $6.begin(), $6.end());
     }
     ;
 

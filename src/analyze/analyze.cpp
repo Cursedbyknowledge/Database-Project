@@ -29,6 +29,20 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
             }
         }
 
+        // 解析别名：将别名引用(c.col)解析为真实表名(customers.col)
+        for (auto &sv_col : x->cols) {
+            if (!sv_col->tab_name.empty() && x->alias_map.count(sv_col->tab_name))
+                sv_col->tab_name = x->alias_map[sv_col->tab_name];
+        }
+        for (auto &cond : x->conds) {
+            if (!cond->lhs->tab_name.empty() && x->alias_map.count(cond->lhs->tab_name))
+                cond->lhs->tab_name = x->alias_map[cond->lhs->tab_name];
+            if (auto rhs_col = std::dynamic_pointer_cast<ast::Col>(cond->rhs)) {
+                if (!rhs_col->tab_name.empty() && x->alias_map.count(rhs_col->tab_name))
+                    rhs_col->tab_name = x->alias_map[rhs_col->tab_name];
+            }
+        }
+
         // 处理target list，再target list中添加上表名，例如 a.id
         for (auto &sv_sel_col : x->cols) {
             TabCol sel_col = {.tab_name = sv_sel_col->tab_name, .col_name = sv_sel_col->col_name};
