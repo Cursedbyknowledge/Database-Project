@@ -128,6 +128,7 @@ class IndexScanExecutor : public AbstractExecutor {
                         return nullptr;
                     }
                 }
+                runtime_output_++;
                 return rec;
             }
         } catch (RecordNotFoundError &e) {
