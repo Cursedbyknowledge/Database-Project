@@ -218,12 +218,15 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     RecordPrinter::print_record_count(num_rec, context);
 }
 
-// 自由函数：序列化计划树
+// 自由函数：序列化计划树 (parent_rows: 父节点行数，供Filter/Scan区分)
 static void explain_plan(std::shared_ptr<Plan> p, int indent,
-                         const std::map<const Plan*, int>& rows_map, std::string& out) {
+                         const std::map<const Plan*, int>& rows_map, std::string& out,
+                         int parent_rows = -1) {
     int rows = rows_map.count(p.get()) ? rows_map.at(p.get()) : 0;
     if (auto sp = std::dynamic_pointer_cast<ScanPlan>(p)) {
         if (!sp->fed_conds_.empty()) {
+            // Filter rows = 父节点行数(过滤后)，Scan rows = 本节点行数(扫描全部)
+            int filter_rows = (parent_rows >= 0) ? parent_rows : rows;
             out += std::string(indent, '\t') + "Filter(condition=[";
             // 条件按字典序排序
             auto sorted_conds = sp->fed_conds_;
@@ -246,7 +249,7 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
                     else out += c.rhs_val.str_val;
                 }
             }
-            out += "], rows=" + std::to_string(rows) + ")\n";
+            out += "], rows=" + std::to_string(filter_rows) + ")\n";
             indent++;
         }
         out += std::string(indent, '\t') + "Scan(table=" + sp->tab_name_ + ", type=";
@@ -271,8 +274,8 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
             out += "=" + jp->conds_[i].rhs_col.tab_name + "." + jp->conds_[i].rhs_col.col_name;
         }
         out += "], rows=" + std::to_string(rows) + ")\n";
-        explain_plan(jp->left_, indent + 1, rows_map, out);
-        explain_plan(jp->right_, indent + 1, rows_map, out);
+        explain_plan(jp->left_, indent + 1, rows_map, out, rows);
+        explain_plan(jp->right_, indent + 1, rows_map, out, rows);
     } else if (auto pp = std::dynamic_pointer_cast<ProjectionPlan>(p)) {
         out += std::string(indent, '\t') + "Project(columns=[";
         if (pp->sel_cols_.empty() || (pp->sel_cols_.size() == 1 && pp->sel_cols_[0].col_name == "*")) {
@@ -289,7 +292,7 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
             }
         }
         out += "], rows=" + std::to_string(rows) + ")\n";
-        explain_plan(pp->subplan_, indent + 1, rows_map, out);
+        explain_plan(pp->subplan_, indent + 1, rows_map, out, rows);
     }
 }
 
