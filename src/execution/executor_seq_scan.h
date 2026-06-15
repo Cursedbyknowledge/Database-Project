@@ -63,6 +63,7 @@ class SeqScanExecutor : public AbstractExecutor {
                 return nullptr;
             }
         }
+        runtime_output_++;  // Filter/Scan output: 过滤后的行数
         return rec;
     }
 

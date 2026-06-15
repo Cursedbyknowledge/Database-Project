@@ -218,15 +218,16 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     RecordPrinter::print_record_count(num_rec, context);
 }
 
-// 自由函数：序列化计划树 (parent_rows: 父节点行数，供Filter/Scan区分)
+// 自由函数：序列化计划树
 static void explain_plan(std::shared_ptr<Plan> p, int indent,
-                         const std::map<const Plan*, int>& rows_map, std::string& out,
-                         int parent_rows = -1) {
+                         const std::map<const Plan*, int>& rows_map,
+                         const std::map<const Plan*, int>& out_rows_map,
+                         std::string& out) {
     int rows = rows_map.count(p.get()) ? rows_map.at(p.get()) : 0;
+    int out_rows = out_rows_map.count(p.get()) ? out_rows_map.at(p.get()) : rows;
     if (auto sp = std::dynamic_pointer_cast<ScanPlan>(p)) {
         if (!sp->fed_conds_.empty()) {
-            // Filter rows = 父节点行数(过滤后)，Scan rows = 本节点行数(扫描全部)
-            int filter_rows = (parent_rows >= 0) ? parent_rows : rows;
+            // Filter rows = 过滤后输出, Scan rows = 扫描总行数
             out += std::string(indent, '\t') + "Filter(condition=[";
             // 条件按字典序排序
             auto sorted_conds = sp->fed_conds_;
@@ -249,7 +250,7 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
                     else out += c.rhs_val.str_val;
                 }
             }
-            out += "], rows=" + std::to_string(filter_rows) + ")\n";
+            out += "], rows=" + std::to_string(out_rows) + ")\n";
             indent++;
         }
         out += std::string(indent, '\t') + "Scan(table=" + sp->tab_name_ + ", type=";
@@ -258,7 +259,6 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
     } else if (auto jp = std::dynamic_pointer_cast<JoinPlan>(p)) {
         out += std::string(indent, '\t') + "Join(";
         out += "tables=[";
-        // 收集所有表名并排序
         std::vector<std::string> tabs;
         auto collect = [&](auto self, std::shared_ptr<Plan> cp) -> void {
             if (auto s = std::dynamic_pointer_cast<ScanPlan>(cp)) tabs.push_back(s->tab_name_);
@@ -274,14 +274,13 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
             out += "=" + jp->conds_[i].rhs_col.tab_name + "." + jp->conds_[i].rhs_col.col_name;
         }
         out += "], rows=" + std::to_string(rows) + ")\n";
-        explain_plan(jp->left_, indent + 1, rows_map, out, rows);
-        explain_plan(jp->right_, indent + 1, rows_map, out, rows);
+        explain_plan(jp->left_, indent + 1, rows_map, out_rows_map, out);
+        explain_plan(jp->right_, indent + 1, rows_map, out_rows_map, out);
     } else if (auto pp = std::dynamic_pointer_cast<ProjectionPlan>(p)) {
         out += std::string(indent, '\t') + "Project(columns=[";
         if (pp->sel_cols_.empty() || (pp->sel_cols_.size() == 1 && pp->sel_cols_[0].col_name == "*")) {
             out += "*";
         } else {
-            // 列名按字母顺序排序
             auto cols = pp->sel_cols_;
             std::sort(cols.begin(), cols.end(), [](auto &a, auto &b) {
                 return (a.tab_name + "." + a.col_name) < (b.tab_name + "." + b.col_name);
@@ -292,7 +291,7 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
             }
         }
         out += "], rows=" + std::to_string(rows) + ")\n";
-        explain_plan(pp->subplan_, indent + 1, rows_map, out, rows);
+        explain_plan(pp->subplan_, indent + 1, rows_map, out_rows_map, out);
     }
 }
 
@@ -305,12 +304,13 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
         executorTreeRoot->Next();
     }
     
-    // 递归收集行数：遍历计划树和执行器树
-    std::map<const Plan*, int> rows_map;
+    // 递归收集行数：rows_map(扫描总数), out_rows_map(过滤输出)
+    std::map<const Plan*, int> rows_map, out_rows_map;
     std::function<void(std::shared_ptr<Plan>, AbstractExecutor*)> collect;
     collect = [&](std::shared_ptr<Plan> p, AbstractExecutor* e) {
         if (!p || !e) return;
         rows_map[p.get()] = e->runtime_rows_;
+        out_rows_map[p.get()] = e->runtime_output_;
         auto children = e->get_children();
         if (auto pp = std::dynamic_pointer_cast<ProjectionPlan>(p)) {
             if (!children.empty()) collect(pp->subplan_, children[0]);
@@ -325,7 +325,7 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
     
     // 生成EXPLAIN树
     std::string out;
-    explain_plan(plan, 0, rows_map, out);
+    explain_plan(plan, 0, rows_map, out_rows_map, out);
     
     // 发送给客户端
     memcpy(context->data_send_, out.c_str(), std::min(out.size(), (size_t)BUFFER_LENGTH - 1));

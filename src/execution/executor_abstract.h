@@ -20,7 +20,8 @@ class AbstractExecutor {
     Rid _abstract_rid;
 
     Context *context_;
-    int runtime_rows_ = 0;  // EXPLAIN ANALYZE: 运行时累计行数
+    int runtime_rows_ = 0;   // EXPLAIN: 扫描总行数(含过滤)
+    int runtime_output_ = 0; // EXPLAIN: 过滤后输出行数
 
     virtual ~AbstractExecutor() = default;
 
