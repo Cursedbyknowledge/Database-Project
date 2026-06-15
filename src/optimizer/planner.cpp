@@ -220,6 +220,29 @@ std::shared_ptr<Plan> Planner::make_one_rel(std::shared_ptr<Query> query)
     }
     // 获取where条件
     auto conds = std::move(query->conds);
+    // 谓词下推：将单表过滤条件(is_rhs_val)推至对应ScanPlan的fed_conds_
+    auto it_filt = conds.begin();
+    while (it_filt != conds.end()) {
+        if (it_filt->is_rhs_val) {
+            auto sp = std::dynamic_pointer_cast<ScanPlan>(table_scan_executors[0]);
+            bool pushed = false;
+            for (size_t i = 0; i < tables.size(); i++) {
+                sp = std::dynamic_pointer_cast<ScanPlan>(table_scan_executors[i]);
+                if (sp && sp->tab_name_ == it_filt->lhs_col.tab_name) {
+                    sp->fed_conds_.push_back(*it_filt);
+                    pushed = true;
+                    break;
+                }
+            }
+            if (pushed) {
+                it_filt = conds.erase(it_filt);
+            } else {
+                ++it_filt;
+            }
+        } else {
+            ++it_filt;
+        }
+    }
     std::shared_ptr<Plan> table_join_executors;
     
     int scantbl[tables.size()];

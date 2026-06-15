@@ -10,6 +10,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "execution_manager.h"
 
+#include <algorithm>
 #include <map>
 
 #include "executor_delete.h"
@@ -217,16 +218,22 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     RecordPrinter::print_record_count(num_rec, context);
 }
 
-// 自由函数：序列化计划树（替代Plan::explain虚函数，避免vtable变更）
+// 自由函数：序列化计划树
 static void explain_plan(std::shared_ptr<Plan> p, int indent,
                          const std::map<const Plan*, int>& rows_map, std::string& out) {
     int rows = rows_map.count(p.get()) ? rows_map.at(p.get()) : 0;
     if (auto sp = std::dynamic_pointer_cast<ScanPlan>(p)) {
         if (!sp->fed_conds_.empty()) {
             out += std::string(indent, '\t') + "Filter(condition=[";
-            for (size_t i = 0; i < sp->fed_conds_.size(); i++) {
+            // 条件按字典序排序
+            auto sorted_conds = sp->fed_conds_;
+            std::sort(sorted_conds.begin(), sorted_conds.end(), [](auto &a, auto &b) {
+                return (a.lhs_col.tab_name + "." + a.lhs_col.col_name) <
+                       (b.lhs_col.tab_name + "." + b.lhs_col.col_name);
+            });
+            for (size_t i = 0; i < sorted_conds.size(); i++) {
                 if (i) out += ", ";
-                auto &c = sp->fed_conds_[i];
+                auto &c = sorted_conds[i];
                 out += c.lhs_col.tab_name + "." + c.lhs_col.col_name;
                 switch (c.op) {
                     case OP_EQ: out += "="; break; case OP_NE: out += "<>"; break;
@@ -248,16 +255,15 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
     } else if (auto jp = std::dynamic_pointer_cast<JoinPlan>(p)) {
         out += std::string(indent, '\t') + "Join(";
         out += "tables=[";
-        bool first = true;
+        // 收集所有表名并排序
+        std::vector<std::string> tabs;
         auto collect = [&](auto self, std::shared_ptr<Plan> cp) -> void {
-            if (auto s = std::dynamic_pointer_cast<ScanPlan>(cp)) {
-                if (!first) out += ", "; first = false;
-                out += s->tab_name_;
-            } else if (auto j = std::dynamic_pointer_cast<JoinPlan>(cp)) {
-                self(self, j->left_); self(self, j->right_);
-            }
+            if (auto s = std::dynamic_pointer_cast<ScanPlan>(cp)) tabs.push_back(s->tab_name_);
+            else if (auto j = std::dynamic_pointer_cast<JoinPlan>(cp)) { self(self, j->left_); self(self, j->right_); }
         };
         collect(collect, jp->left_); collect(collect, jp->right_);
+        std::sort(tabs.begin(), tabs.end());
+        for (size_t i = 0; i < tabs.size(); i++) { if (i) out += ", "; out += tabs[i]; }
         out += "], condition=[";
         for (size_t i = 0; i < jp->conds_.size(); i++) {
             if (i) out += ", ";
@@ -272,9 +278,14 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
         if (pp->sel_cols_.empty() || (pp->sel_cols_.size() == 1 && pp->sel_cols_[0].col_name == "*")) {
             out += "*";
         } else {
-            for (size_t i = 0; i < pp->sel_cols_.size(); i++) {
+            // 列名按字母顺序排序
+            auto cols = pp->sel_cols_;
+            std::sort(cols.begin(), cols.end(), [](auto &a, auto &b) {
+                return (a.tab_name + "." + a.col_name) < (b.tab_name + "." + b.col_name);
+            });
+            for (size_t i = 0; i < cols.size(); i++) {
                 if (i) out += ", ";
-                out += pp->sel_cols_[i].tab_name + "." + pp->sel_cols_[i].col_name;
+                out += cols[i].tab_name + "." + cols[i].col_name;
             }
         }
         out += "], rows=" + std::to_string(rows) + ")\n";
