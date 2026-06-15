@@ -11,6 +11,7 @@ See the Mulan PSL v2 for more details. */
 #include "planner.h"
 
 #include <memory>
+#include <set>
 
 #include "execution/executor_delete.h"
 #include "execution/executor_index_scan.h"
@@ -296,14 +297,16 @@ std::shared_ptr<Plan> Planner::make_one_rel(std::shared_ptr<Query> query)
             } 
 
             if(left_need_to_join_executors != nullptr && right_need_to_join_executors != nullptr) {
-                std::vector<Condition> join_conds{*it};
-                std::shared_ptr<Plan> temp_join_executors = std::make_shared<JoinPlan>(T_NestLoop, 
+                // 两表直接join：当前条件 + 合并左右已有cond
+                std::vector<Condition> merged_conds{*it};
+                // 收集table_join_executors中已有的join条件
+                if (auto existing_jp = std::dynamic_pointer_cast<JoinPlan>(table_join_executors)) {
+                    merged_conds.insert(merged_conds.end(), existing_jp->conds_.begin(), existing_jp->conds_.end());
+                }
+                table_join_executors = std::make_shared<JoinPlan>(T_NestLoop, 
                                                                     std::move(left_need_to_join_executors), 
                                                                     std::move(right_need_to_join_executors), 
-                                                                    join_conds);
-                table_join_executors = std::make_shared<JoinPlan>(T_NestLoop, std::move(temp_join_executors), 
-                                                                    std::move(table_join_executors), 
-                                                                    std::vector<Condition>());
+                                                                    std::move(merged_conds));
             } else if(left_need_to_join_executors != nullptr || right_need_to_join_executors != nullptr) {
                 if(isneedreverse) {
                     std::map<CompOp, CompOp> swap_op = {
@@ -313,9 +316,13 @@ std::shared_ptr<Plan> Planner::make_one_rel(std::shared_ptr<Query> query)
                     it->op = swap_op.at(it->op);
                     left_need_to_join_executors = std::move(right_need_to_join_executors);
                 }
-                std::vector<Condition> join_conds{*it};
+                // 单表join：当前条件 + 合并已有cond
+                std::vector<Condition> merged_conds{*it};
+                if (auto existing_jp = std::dynamic_pointer_cast<JoinPlan>(table_join_executors)) {
+                    merged_conds.insert(merged_conds.end(), existing_jp->conds_.begin(), existing_jp->conds_.end());
+                }
                 table_join_executors = std::make_shared<JoinPlan>(T_NestLoop, std::move(left_need_to_join_executors), 
-                                                                    std::move(table_join_executors), join_conds);
+                                                                    std::move(table_join_executors), std::move(merged_conds));
             } else {
                 push_conds(std::move(&(*it)), table_join_executors);
             }
@@ -372,13 +379,68 @@ std::shared_ptr<Plan> Planner::generate_sort_plan(std::shared_ptr<Query> query, 
  * @param tab_names select plan 目标的表
  * @param conds select plan 选取条件
  */
+
+// 投影下推辅助函数：递归在Join下方为每表插入Project节点
+static std::shared_ptr<Plan> pushdown_projection_impl(
+    std::shared_ptr<Plan> plan,
+    const std::vector<TabCol>& sel_cols,
+    const std::vector<Condition>& all_conds) {
+    
+    if (auto jp = std::dynamic_pointer_cast<JoinPlan>(plan)) {
+        // 递归处理子树
+        jp->left_ = pushdown_projection_impl(jp->left_, sel_cols, all_conds);
+        jp->right_ = pushdown_projection_impl(jp->right_, sel_cols, all_conds);
+        return plan;
+    }
+    if (auto sp = std::dynamic_pointer_cast<ScanPlan>(plan)) {
+        auto &tab_cols = sp->cols_;
+        // 收集该表需要的列：从sel_cols筛选 + 从join条件提取key
+        std::set<std::string> needed_names;
+        for (auto &col : sel_cols) {
+            if (col.tab_name == sp->tab_name_) {
+                needed_names.insert(col.col_name);
+            }
+        }
+        // 加入所有join条件中该表参与的列
+        for (auto &cond : all_conds) {
+            if (!cond.is_rhs_val) { // join条件
+                if (cond.lhs_col.tab_name == sp->tab_name_)
+                    needed_names.insert(cond.lhs_col.col_name);
+                if (cond.rhs_col.tab_name == sp->tab_name_)
+                    needed_names.insert(cond.rhs_col.col_name);
+            }
+        }
+        // 如果不需要精简（SELECT * 或无相关条件），跳过
+        if (needed_names.empty() || needed_names.size() >= tab_cols.size()) {
+            return plan;
+        }
+        // 构建Project的sel_cols（保持原始列顺序）
+        std::vector<TabCol> proj_cols;
+        for (auto &col_meta : tab_cols) {
+            if (needed_names.count(col_meta.name)) {
+                proj_cols.push_back({.tab_name = sp->tab_name_, .col_name = col_meta.name});
+            }
+        }
+        if (proj_cols.size() >= tab_cols.size()) return plan;
+        // 插入Project节点
+        return std::make_shared<ProjectionPlan>(T_Projection, std::move(plan), std::move(proj_cols));
+    }
+    return plan;
+}
+
 std::shared_ptr<Plan> Planner::generate_select_plan(std::shared_ptr<Query> query, Context *context) {
     //逻辑优化
     query = logical_optimization(std::move(query), context);
 
     //物理优化
     auto sel_cols = query->cols;
+    auto original_conds = query->conds;  // 保存原始条件（投影下推需要join key）
     std::shared_ptr<Plan> plannerRoot = physical_optimization(query, context);
+    // 投影下推：在Join下方为每表插入Project节点
+    bool is_star = (sel_cols.size() == 1 && sel_cols[0].col_name == "*");
+    if (!is_star) {
+        plannerRoot = pushdown_projection_impl(plannerRoot, sel_cols, original_conds);
+    }
     plannerRoot = std::make_shared<ProjectionPlan>(T_Projection, std::move(plannerRoot), 
                                                         std::move(sel_cols));
 

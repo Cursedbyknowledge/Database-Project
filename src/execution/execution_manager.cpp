@@ -233,16 +233,23 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
         std::vector<std::string> tabs;
         auto collect = [&](auto self, std::shared_ptr<Plan> cp) -> void {
             if (auto s = std::dynamic_pointer_cast<ScanPlan>(cp)) tabs.push_back(s->tab_name_);
+            else if (auto pp = std::dynamic_pointer_cast<ProjectionPlan>(cp)) { self(self, pp->subplan_); }
             else if (auto j = std::dynamic_pointer_cast<JoinPlan>(cp)) { self(self, j->left_); self(self, j->right_); }
         };
         collect(collect, jp->left_); collect(collect, jp->right_);
         std::sort(tabs.begin(), tabs.end());
         for (size_t i = 0; i < tabs.size(); i++) { if (i) out += ", "; out += tabs[i]; }
         out += "], condition=[";
-        for (size_t i = 0; i < jp->conds_.size(); i++) {
+        // Join条件按字典序排序
+        auto sorted_join_conds = jp->conds_;
+        std::sort(sorted_join_conds.begin(), sorted_join_conds.end(), [](auto &a, auto &b) {
+            return (a.lhs_col.tab_name + "." + a.lhs_col.col_name) <
+                   (b.lhs_col.tab_name + "." + b.lhs_col.col_name);
+        });
+        for (size_t i = 0; i < sorted_join_conds.size(); i++) {
             if (i) out += ", ";
-            out += jp->conds_[i].lhs_col.tab_name + "." + jp->conds_[i].lhs_col.col_name;
-            out += "=" + jp->conds_[i].rhs_col.tab_name + "." + jp->conds_[i].rhs_col.col_name;
+            out += sorted_join_conds[i].lhs_col.tab_name + "." + sorted_join_conds[i].lhs_col.col_name;
+            out += "=" + sorted_join_conds[i].rhs_col.tab_name + "." + sorted_join_conds[i].rhs_col.col_name;
         }
         out += "], rows=" + std::to_string(rows) + ")\n";
         explain_plan(jp->left_, indent + 1, rows_map, out_rows_map, out);
