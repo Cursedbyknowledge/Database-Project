@@ -38,7 +38,7 @@ class ProjectionExecutor : public AbstractExecutor {
         len_ = curr_offset;
     }
 
-    void beginTuple() override { runtime_rows_ = 0; runtime_output_ = 0; prev_->beginTuple(); }
+    void beginTuple() override { prev_->beginTuple(); }
 
     void nextTuple() override { prev_->nextTuple(); }
 

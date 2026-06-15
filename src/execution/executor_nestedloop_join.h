@@ -45,8 +45,6 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     }
 
     void beginTuple() override {
-        runtime_rows_ = 0;
-        runtime_output_ = 0;
         left_->beginTuple();
     }
 
