@@ -46,6 +46,9 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
 
     void beginTuple() override {
         left_->beginTuple();
+        left_record_ = nullptr;
+        right_record_ = nullptr;
+        isend_ = false;
     }
 
     void nextTuple() override {
@@ -56,6 +59,11 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         if (right_->is_end() || !right_record_) {
             right_->beginTuple();
             left_record_ = left_->Next();  // 外表每轮只读一次
+            // 跳过外表被过滤条件拒绝的记录
+            while (left_record_ == nullptr && !left_->is_end()) {
+                left_->nextTuple();
+                left_record_ = left_->Next();
+            }
         } else {
             right_->nextTuple();
         }
@@ -84,6 +92,11 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
             if (!left_->is_end()) {
                 right_->beginTuple();
                 left_record_ = left_->Next();
+                // 跳过外表被过滤条件拒绝的记录
+                while (left_record_ == nullptr && !left_->is_end()) {
+                    left_->nextTuple();
+                    left_record_ = left_->Next();
+                }
             } else {
                 left_record_ = nullptr;
             }
