@@ -439,12 +439,12 @@ std::shared_ptr<Plan> Planner::generate_select_plan(std::shared_ptr<Query> query
     auto original_conds = query->conds;  // 保存原始条件（投影下推需要join key）
     std::shared_ptr<Plan> plannerRoot = physical_optimization(query, context);
     // 投影下推：在Join下方为每表插入Project节点
-    bool is_star = (sel_cols.size() == 1 && sel_cols[0].col_name == "*");
+    bool is_star = query->cols_star_;
     if (!is_star) {
         plannerRoot = pushdown_projection_impl(plannerRoot, sel_cols, original_conds);
     }
     plannerRoot = std::make_shared<ProjectionPlan>(T_Projection, std::move(plannerRoot), 
-                                                        std::move(sel_cols));
+                                                        std::move(sel_cols), is_star);
 
     return plannerRoot;
 }

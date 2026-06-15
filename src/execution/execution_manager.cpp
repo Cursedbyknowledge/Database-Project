@@ -274,7 +274,7 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
         explain_plan(jp->right_, indent + 1, rows_map, out_rows_map, out, alias_map);
     } else if (auto pp = std::dynamic_pointer_cast<ProjectionPlan>(p)) {
         out += std::string(indent, '\t') + "Project(columns=[";
-        if (pp->sel_cols_.empty() || (pp->sel_cols_.size() == 1 && pp->sel_cols_[0].col_name == "*")) {
+        if (pp->is_star_ || pp->sel_cols_.empty() || (pp->sel_cols_.size() == 1 && pp->sel_cols_[0].col_name == "*")) {
             out += "*";
         } else {
             auto cols = pp->sel_cols_;

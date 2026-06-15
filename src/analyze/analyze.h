@@ -29,6 +29,8 @@ class Query{
     std::vector<Condition> conds;
     // 投影列
     std::vector<TabCol> cols;
+    // 原始查询为 SELECT * 的标记
+    bool cols_star_ = false;
     // 表名
     std::vector<std::string> tables;
     // update 的set 值

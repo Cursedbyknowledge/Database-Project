@@ -73,7 +73,8 @@ class Portal
                     std::shared_ptr<ProjectionPlan> p = std::dynamic_pointer_cast<ProjectionPlan>(x->subplan_);
                     std::unique_ptr<AbstractExecutor> root= convert_plan_executor(p, context);
                     portalTag tag = context->explain_ ? PORTAL_EXPLAIN : PORTAL_ONE_SELECT;
-                    return std::make_shared<PortalStmt>(tag, std::move(p->sel_cols_), std::move(root), plan);
+                    // 复制sel_cols而非移动，EXPLAIN时plan树的sel_cols_还需使用
+                    return std::make_shared<PortalStmt>(tag, p->sel_cols_, std::move(root), plan);
                 }
                     
                 case T_Update:
