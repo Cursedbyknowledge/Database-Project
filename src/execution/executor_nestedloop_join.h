@@ -14,7 +14,6 @@ See the Mulan PSL v2 for more details. */
 #include "executor_abstract.h"
 #include "index/ix.h"
 #include "system/sm.h"
-#include "execution_common.h"
 
 class NestedLoopJoinExecutor : public AbstractExecutor {
    private:
@@ -24,12 +23,144 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     std::vector<ColMeta> cols_;
 
     std::vector<Condition> fed_conds_;
-    bool isend_;
-    std::unique_ptr<RmRecord> left_record_;
-    std::unique_ptr<RmRecord> right_record_;
+    bool isend;
+
+    std::unique_ptr<RmRecord> left_rec_;
+    std::unique_ptr<RmRecord> right_rec_;
+
+    bool eval_join_cond(const Condition &cond) {
+        const char *lhs_ptr = nullptr;
+        const char *rhs_ptr = nullptr;
+        ColType lhs_type;
+
+        for (auto &col : cols_) {
+            if (col.tab_name == cond.lhs_col.tab_name && col.name == cond.lhs_col.col_name) {
+                if (col.offset < (int)left_->tupleLen()) {
+                    lhs_ptr = left_rec_->data + col.offset;
+                } else {
+                    lhs_ptr = right_rec_->data + (col.offset - left_->tupleLen());
+                }
+                lhs_type = col.type;
+                break;
+            }
+        }
+
+        if (cond.is_rhs_val) {
+            if (lhs_type == TYPE_INT) {
+                int lhs_val = *(int *)lhs_ptr;
+                int rhs_val = cond.rhs_val.int_val;
+                switch (cond.op) {
+                    case OP_EQ: return lhs_val == rhs_val;
+                    case OP_NE: return lhs_val != rhs_val;
+                    case OP_LT: return lhs_val < rhs_val;
+                    case OP_GT: return lhs_val > rhs_val;
+                    case OP_LE: return lhs_val <= rhs_val;
+                    case OP_GE: return lhs_val >= rhs_val;
+                }
+            } else if (lhs_type == TYPE_FLOAT) {
+                float lhs_val = *(float *)lhs_ptr;
+                float rhs_val = cond.rhs_val.float_val;
+                switch (cond.op) {
+                    case OP_EQ: return lhs_val == rhs_val;
+                    case OP_NE: return lhs_val != rhs_val;
+                    case OP_LT: return lhs_val < rhs_val;
+                    case OP_GT: return lhs_val > rhs_val;
+                    case OP_LE: return lhs_val <= rhs_val;
+                    case OP_GE: return lhs_val >= rhs_val;
+                }
+            } else if (lhs_type == TYPE_STRING) {
+                std::string lhs_val(lhs_ptr, strnlen(lhs_ptr, 256));
+                std::string rhs_val = cond.rhs_val.str_val;
+                switch (cond.op) {
+                    case OP_EQ: return lhs_val == rhs_val;
+                    case OP_NE: return lhs_val != rhs_val;
+                    case OP_LT: return lhs_val < rhs_val;
+                    case OP_GT: return lhs_val > rhs_val;
+                    case OP_LE: return lhs_val <= rhs_val;
+                    case OP_GE: return lhs_val >= rhs_val;
+                }
+            }
+            return true;
+        } else {
+            ColType rhs_type;
+            for (auto &col : cols_) {
+                if (col.tab_name == cond.rhs_col.tab_name && col.name == cond.rhs_col.col_name) {
+                    if (col.offset < (int)left_->tupleLen()) {
+                        rhs_ptr = left_rec_->data + col.offset;
+                    } else {
+                        rhs_ptr = right_rec_->data + (col.offset - left_->tupleLen());
+                    }
+                    rhs_type = col.type;
+                    break;
+                }
+            }
+            if (lhs_type == TYPE_INT) {
+                int lhs_val = *(int *)lhs_ptr;
+                int rhs_val = *(int *)rhs_ptr;
+                switch (cond.op) {
+                    case OP_EQ: return lhs_val == rhs_val;
+                    case OP_NE: return lhs_val != rhs_val;
+                    case OP_LT: return lhs_val < rhs_val;
+                    case OP_GT: return lhs_val > rhs_val;
+                    case OP_LE: return lhs_val <= rhs_val;
+                    case OP_GE: return lhs_val >= rhs_val;
+                }
+            } else if (lhs_type == TYPE_FLOAT) {
+                float lhs_val = *(float *)lhs_ptr;
+                float rhs_val = *(float *)rhs_ptr;
+                switch (cond.op) {
+                    case OP_EQ: return lhs_val == rhs_val;
+                    case OP_NE: return lhs_val != rhs_val;
+                    case OP_LT: return lhs_val < rhs_val;
+                    case OP_GT: return lhs_val > rhs_val;
+                    case OP_LE: return lhs_val <= rhs_val;
+                    case OP_GE: return lhs_val >= rhs_val;
+                }
+            } else if (lhs_type == TYPE_STRING) {
+                std::string lhs_val(lhs_ptr, strnlen(lhs_ptr, 256));
+                std::string rhs_val(rhs_ptr, strnlen(rhs_ptr, 256));
+                switch (cond.op) {
+                    case OP_EQ: return lhs_val == rhs_val;
+                    case OP_NE: return lhs_val != rhs_val;
+                    case OP_LT: return lhs_val < rhs_val;
+                    case OP_GT: return lhs_val > rhs_val;
+                    case OP_LE: return lhs_val <= rhs_val;
+                    case OP_GE: return lhs_val >= rhs_val;
+                }
+            }
+            return true;
+        }
+    }
+
+    bool eval_conds() {
+        for (auto &cond : fed_conds_) {
+            if (!eval_join_cond(cond)) return false;
+        }
+        return true;
+    }
+
+    void advance_to_match() {
+        while (true) {
+            while (!right_->is_end()) {
+                right_rec_ = right_->Next();
+                if (right_rec_ && eval_conds()) return;
+                right_->nextTuple();
+            }
+            left_->nextTuple();
+            if (left_->is_end()) { isend = true; return; }
+            // 跳过左表被过滤的记录
+            while (!left_->is_end()) {
+                left_rec_ = left_->Next();
+                if (left_rec_) break;
+                left_->nextTuple();
+            }
+            if (left_->is_end()) { isend = true; return; }
+            right_->beginTuple();
+        }
+    }
 
    public:
-    NestedLoopJoinExecutor(std::unique_ptr<AbstractExecutor> left, std::unique_ptr<AbstractExecutor> right,
+    NestedLoopJoinExecutor(std::unique_ptr<AbstractExecutor> left, std::unique_ptr<AbstractExecutor> right, 
                             std::vector<Condition> conds) {
         left_ = std::move(left);
         right_ = std::move(right);
@@ -39,83 +170,59 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         for (auto &col : right_cols) {
             col.offset += left_->tupleLen();
         }
+
         cols_.insert(cols_.end(), right_cols.begin(), right_cols.end());
-        isend_ = false;
+        isend = false;
         fed_conds_ = std::move(conds);
     }
 
     void beginTuple() override {
         left_->beginTuple();
-        left_record_ = nullptr;
-        right_record_ = nullptr;
-        isend_ = false;
+        right_->beginTuple();
+        isend = false;
+        // 跳过左表被过滤的记录
+        while (!left_->is_end()) {
+            left_rec_ = left_->Next();
+            if (left_rec_) break;
+            left_->nextTuple();
+        }
+        if (left_->is_end()) { isend = true; return; }
+        advance_to_match();
     }
 
     void nextTuple() override {
-        if (left_->is_end()) {
-            isend_ = true;
-            return;
-        }
-        if (right_->is_end() || !right_record_) {
-            right_->beginTuple();
-            left_record_ = left_->Next();  // 外表每轮只读一次
-            // 跳过外表被过滤条件拒绝的记录
-            while (left_record_ == nullptr && !left_->is_end()) {
-                left_->nextTuple();
-                left_record_ = left_->Next();
-            }
-        } else {
-            right_->nextTuple();
-        }
-        while (left_record_ && !left_->is_end()) {
-            while (!right_->is_end()) {
-                right_record_ = right_->Next();
-                if (right_record_) {
-                    bool match = true;
-                    for (auto& cond : fed_conds_) {
-                        if (!eval_cond_join(left_record_->data, right_record_->data, cond,
-                                           left_->cols(), right_->cols())) {
-                            match = false;
-                            break;
-                        }
-                    }
-                    if (match) {
-                        runtime_rows_++;
-                        runtime_output_++;
-                        isend_ = false;
-                        return;
-                    }
-                }
-                right_->nextTuple();
-            }
+        right_->nextTuple();
+        if (right_->is_end()) {
             left_->nextTuple();
-            if (!left_->is_end()) {
-                right_->beginTuple();
-                left_record_ = left_->Next();
-                // 跳过外表被过滤条件拒绝的记录
-                while (left_record_ == nullptr && !left_->is_end()) {
-                    left_->nextTuple();
-                    left_record_ = left_->Next();
-                }
-            } else {
-                left_record_ = nullptr;
+            if (left_->is_end()) { isend = true; return; }
+            // 跳过左表被过滤的记录
+            while (!left_->is_end()) {
+                left_rec_ = left_->Next();
+                if (left_rec_) break;
+                left_->nextTuple();
             }
+            if (left_->is_end()) { isend = true; return; }
+            right_->beginTuple();
         }
-        isend_ = true;
+        advance_to_match();
+    }
+
+    bool is_end() const override {
+        return isend;
     }
 
     std::unique_ptr<RmRecord> Next() override {
-        if (!left_record_ || !right_record_) return nullptr;
-        auto joined = std::make_unique<RmRecord>(len_);
-        memcpy(joined->data, left_record_->data, left_->tupleLen());
-        memcpy(joined->data + left_->tupleLen(), right_record_->data, right_->tupleLen());
-        return joined;
+        runtime_rows_++;
+        runtime_output_++;
+        auto record = std::make_unique<RmRecord>(len_);
+        memcpy(record->data, left_rec_->data, left_->tupleLen());
+        memcpy(record->data + left_->tupleLen(), right_rec_->data, right_->tupleLen());
+        return record;
     }
 
-    bool is_end() const override { return isend_; }
+    size_t tupleLen() const override { return len_; }
 
     const std::vector<ColMeta> &cols() const override { return cols_; }
-    size_t tupleLen() const override { return len_; }
 
     Rid &rid() override { return _abstract_rid; }
     std::vector<AbstractExecutor*> get_children() override { return {left_.get(), right_.get()}; }

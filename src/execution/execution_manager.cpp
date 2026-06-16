@@ -9,6 +9,7 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
 #include "execution_manager.h"
+
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
@@ -48,118 +49,133 @@ const char *help_info = "Supported SQL syntax:\n"
                    "selector:\n"
                    "  {* | column [, column ...]}\n";
 
-// 统一输出拦截器：双保险路径策略
-static void write_to_output(SmManager* sm_manager, const std::string& output_str) {
-    if (output_str.empty()) return;
-    
-    std::string db_name = sm_manager->get_db_name();
-    std::string path1 = db_name.empty() ? "output.txt" : (db_name + "/output.txt");
-    std::string path2 = "output.txt";
-    
-    std::fstream outfile;
-    outfile.open(path1, std::ios::out | std::ios::app);
-    if (!outfile.is_open()) {
-        outfile.open(path2, std::ios::out | std::ios::app);
-    }
-    
-    if (outfile.is_open()) {
-        outfile << output_str;
-        outfile.close();
-    }
-}
-
 // 主要负责执行DDL语句
 void QlManager::run_mutli_query(std::shared_ptr<Plan> plan, Context *context){
-    int old_offset = *(context->offset_);
     if (auto x = std::dynamic_pointer_cast<DDLPlan>(plan)) {
         switch(x->tag) {
             case T_CreateTable:
-                sm_manager_->create_table(x->tab_name_, x->cols_, context); break;
+            {
+                sm_manager_->create_table(x->tab_name_, x->cols_, context);
+                break;
+            }
             case T_DropTable:
-                sm_manager_->drop_table(x->tab_name_, context); break;
+            {
+                sm_manager_->drop_table(x->tab_name_, context);
+                break;
+            }
             case T_CreateIndex:
-                sm_manager_->create_index(x->tab_name_, x->tab_col_names_, context); break;
+            {
+                sm_manager_->create_index(x->tab_name_, x->tab_col_names_, context);
+                break;
+            }
             case T_DropIndex:
-                sm_manager_->drop_index(x->tab_name_, x->tab_col_names_, context); break;
+            {
+                sm_manager_->drop_index(x->tab_name_, x->tab_col_names_, context);
+                break;
+            }
             default:
-                throw InternalError("Unexpected field type"); break;  
+                throw InternalError("Unexpected field type");
+                break;  
         }
-    }
-    int new_offset = *(context->offset_);
-    if (new_offset > old_offset) {
-        write_to_output(sm_manager_, std::string(context->data_send_ + old_offset, new_offset - old_offset));
     }
 }
 
 // 执行help; show tables; desc table; begin; commit; abort;语句
 void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Context *context) {
-    int old_offset = *(context->offset_);
-
     if (auto x = std::dynamic_pointer_cast<OtherPlan>(plan)) {
         switch(x->tag) {
             case T_Help:
+            {
                 memcpy(context->data_send_ + *(context->offset_), help_info, strlen(help_info));
-                *(context->offset_) += strlen(help_info);
+                *(context->offset_) = strlen(help_info);
                 break;
+            }
             case T_ShowTable:
-                sm_manager_->show_tables(context); break;
-            case T_ShowIndex:
-                sm_manager_->show_index(x->tab_name_, context); break;
+            {
+                sm_manager_->show_tables(context);
+                break;
+            }
             case T_DescTable:
-                sm_manager_->desc_table(x->tab_name_, context); break;
+            {
+                sm_manager_->desc_table(x->tab_name_, context);
+                break;
+            }
             case T_Transaction_begin:
-                context->txn_->set_txn_mode(true); break;
+            {
+                // 显示开启一个事务
+                context->txn_->set_txn_mode(true);
+                break;
+            }  
             case T_Transaction_commit:
+            {
                 context->txn_ = txn_mgr_->get_transaction(*txn_id);
-                txn_mgr_->commit(context->txn_, context->log_mgr_); break;
+                txn_mgr_->commit(context->txn_, context->log_mgr_);
+                break;
+            }    
             case T_Transaction_rollback:
-            case T_Transaction_abort:
+            {
                 context->txn_ = txn_mgr_->get_transaction(*txn_id);
-                txn_mgr_->abort(context->txn_, context->log_mgr_); break;
+                txn_mgr_->abort(context->txn_, context->log_mgr_);
+                break;
+            }    
+            case T_Transaction_abort:
+            {
+                context->txn_ = txn_mgr_->get_transaction(*txn_id);
+                txn_mgr_->abort(context->txn_, context->log_mgr_);
+                break;
+            }     
             default:
-                throw InternalError("Unexpected field type"); break;                        
+                throw InternalError("Unexpected field type");
+                break;                        
         }
-    } else if(auto x = std::dynamic_pointer_cast<SetKnobPlan>(plan)) {
-        switch (x->set_knob_type_) {
-        case ast::SetKnobType::EnableNestLoop: 
-            planner_->set_enable_nestedloop_join(x->bool_value_); break;
-        case ast::SetKnobType::EnableSortMerge: 
-            planner_->set_enable_sortmerge_join(x->bool_value_); break;
-        default: 
-            throw RMDBError("Not implemented!\n"); break;
-        }
-    }
 
-    int new_offset = *(context->offset_);
-    if (new_offset > old_offset) {
-        write_to_output(sm_manager_, std::string(context->data_send_ + old_offset, new_offset - old_offset));
+    } else if(auto x = std::dynamic_pointer_cast<SetKnobPlan>(plan)) {
+        switch (x->set_knob_type_)
+        {
+        case ast::SetKnobType::EnableNestLoop: {
+            planner_->set_enable_nestedloop_join(x->bool_value_);
+            break;
+        }
+        case ast::SetKnobType::EnableSortMerge: {
+            planner_->set_enable_sortmerge_join(x->bool_value_);
+            break;
+        }
+        default: {
+            throw RMDBError("Not implemented!\n");
+            break;
+        }
+        }
     }
 }
 
-// 执行select语句
+// 执行select语句，select语句的输出除了需要返回客户端外，还需要写入output.txt文件中
 void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, std::vector<TabCol> sel_cols, 
                             Context *context) {
-    int old_offset = *(context->offset_);
-
-    // 列名始终从执行器获取，保证与数据列顺序一致
-    // ProjectionExecutor已为非SELECT*查询按用户指定顺序重排列
-    // SELECT*时保持NLJ/Scan的实际列顺序
     std::vector<std::string> captions;
-    for (auto &col : executorTreeRoot->cols()) {
-        captions.push_back(col.name);
+    captions.reserve(sel_cols.size());
+    for (auto &sel_col : sel_cols) {
+        captions.push_back(sel_col.col_name);
     }
 
     // Print header into buffer
-    RecordPrinter rec_printer(captions.size());
+    RecordPrinter rec_printer(sel_cols.size());
     rec_printer.print_separator(context);
     rec_printer.print_record(captions, context);
     rec_printer.print_separator(context);
+    // print header into file
+    std::fstream outfile;
+    outfile.open("output.txt", std::ios::out | std::ios::app);
+    outfile << "|";
+    for(int i = 0; i < captions.size(); ++i) {
+        outfile << " " << captions[i] << " |";
+    }
+    outfile << "\n";
 
     // Print records
     size_t num_rec = 0;
+    // 执行query_plan
     for (executorTreeRoot->beginTuple(); !executorTreeRoot->is_end(); executorTreeRoot->nextTuple()) {
         auto Tuple = executorTreeRoot->Next();
-        if (Tuple == nullptr) continue;
         std::vector<std::string> columns;
         for (auto &col : executorTreeRoot->cols()) {
             std::string col_str;
@@ -169,28 +185,26 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
             } else if (col.type == TYPE_FLOAT) {
                 col_str = std::to_string(*(float *)rec_buf);
             } else if (col.type == TYPE_STRING) {
-                // 安全截断：找到第一个\0或到col.len
-                int len = 0;
-                while (len < col.len && rec_buf[len] != '\0') len++;
-                col_str = std::string((char *)rec_buf, len);
+                col_str = std::string((char *)rec_buf, col.len);
+                col_str.resize(strlen(col_str.c_str()));
             }
             columns.push_back(col_str);
         }
+        // print record into buffer
         rec_printer.print_record(columns, context);
-        num_rec++;
-        if (num_rec > 100000) {  // 安全阀：防止无限循环耗尽内存
-            std::cerr << "WARNING: select_from loop exceeded 100000 records, breaking" << std::endl;
-            break;
+        // print record into file
+        outfile << "|";
+        for(int i = 0; i < columns.size(); ++i) {
+            outfile << " " << columns[i] << " |";
         }
+        outfile << "\n";
+        num_rec++;
     }
-    
+    outfile.close();
+    // Print footer into buffer
     rec_printer.print_separator(context);
+    // Print record count into buffer
     RecordPrinter::print_record_count(num_rec, context);
-
-    int new_offset = *(context->offset_);
-    if (new_offset > old_offset) {
-        write_to_output(sm_manager_, std::string(context->data_send_ + old_offset, new_offset - old_offset));
-    }
 }
 
 // 自由函数：序列化计划树
@@ -201,7 +215,6 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
                          const std::map<std::string, std::string>& alias_map) {
     int rows = rows_map.count(p.get()) ? rows_map.at(p.get()) : 0;
     int out_rows = out_rows_map.count(p.get()) ? out_rows_map.at(p.get()) : rows;
-    // 别名查找：若有别名则用别名，否则用原表名
     auto alias_for = [&](const std::string& real) -> std::string {
         auto it = alias_map.find(real);
         return (it != alias_map.end()) ? it->second : real;
@@ -231,7 +244,6 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
                         std::ostringstream oss;
                         oss << std::fixed << std::setprecision(6) << fv;
                         std::string s = oss.str();
-                        // 去除尾随零
                         s.erase(s.find_last_not_of('0') + 1, std::string::npos);
                         if (s.back() == '.') s.pop_back();
                         out += s;
@@ -268,7 +280,6 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
         std::sort(tabs.begin(), tabs.end());
         for (size_t i = 0; i < tabs.size(); i++) { if (i) out += ", "; out += tabs[i]; }
         out += "], condition=[";
-        // Join条件按字典序排序
         auto sorted_join_conds = jp->conds_;
         std::sort(sorted_join_conds.begin(), sorted_join_conds.end(), [](auto &a, auto &b) {
             return (a.lhs_col.tab_name + "." + a.lhs_col.col_name) <
@@ -341,7 +352,11 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
     memcpy(context->data_send_ + old_offset, out.c_str(), write_len);
     *(context->offset_) += write_len;
     
-    write_to_output(sm_manager_, out);
+    // Also write to output.txt
+    std::fstream xf;
+    xf.open("output.txt", std::ios::out | std::ios::app);
+    xf << out;
+    xf.close();
 }
 
 // 执行DML语句
