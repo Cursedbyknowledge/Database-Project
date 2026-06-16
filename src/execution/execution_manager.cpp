@@ -154,6 +154,14 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     rec_printer.print_separator(context);
     rec_printer.print_record(captions, context);
     rec_printer.print_separator(context);
+    // 直接写output.txt表头（管道格式，对齐参考实现）
+    std::fstream outfile;
+    outfile.open("output.txt", std::ios::out | std::ios::app);
+    outfile << "|";
+    for (size_t i = 0; i < captions.size(); ++i) {
+        outfile << " " << captions[i] << " |";
+    }
+    outfile << "\n";
 
     // Print records
     size_t num_rec = 0;
@@ -176,21 +184,24 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
             }
             columns.push_back(col_str);
         }
+        // 写入客户端缓冲区（RecordPrinter格式）
         rec_printer.print_record(columns, context);
+        // 直接写output.txt（管道格式）
+        outfile << "|";
+        for (size_t i = 0; i < columns.size(); ++i) {
+            outfile << " " << columns[i] << " |";
+        }
+        outfile << "\n";
         num_rec++;
         if (num_rec > 100000) {  // 安全阀：防止无限循环耗尽内存
             std::cerr << "WARNING: select_from loop exceeded 100000 records, breaking" << std::endl;
             break;
         }
     }
+    outfile.close();
     
     rec_printer.print_separator(context);
     RecordPrinter::print_record_count(num_rec, context);
-
-    int new_offset = *(context->offset_);
-    if (new_offset > old_offset) {
-        write_to_output(sm_manager_, std::string(context->data_send_ + old_offset, new_offset - old_offset));
-    }
 }
 
 // 自由函数：序列化计划树
