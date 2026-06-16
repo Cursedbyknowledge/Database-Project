@@ -138,55 +138,14 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
                             Context *context) {
     int old_offset = *(context->offset_);
 
+    // 列名和列元数据统一从执行器获取，保证与数据列顺序一致
+    // ProjectionExecutor已为非SELECT*查询按用户指定顺序重排列
+    // SELECT*时保持底层算子的实际列顺序
+    auto &actual_cols = executorTreeRoot->cols();
     std::vector<std::string> captions;
-    std::vector<ColMeta> actual_cols;
-
-    // 【核心修复：终极无敌列映射系统，彻底解决投影乱序与Join同名列问题】
-    if (sel_cols.size() == 1 && sel_cols[0].col_name == "*") {
-        actual_cols = executorTreeRoot->cols();
-        for (auto &col : actual_cols) {
-            captions.push_back(col.name);
-        }
-    } else {
-        bool all_found = true;
-        std::vector<ColMeta> mapped_cols;
-        std::vector<bool> used(executorTreeRoot->cols().size(), false); // 跟踪哪些底层列已被映射
-        
-        for (auto &sel_col : sel_cols) {
-            bool found = false;
-            for (size_t i = 0; i < executorTreeRoot->cols().size(); i++) {
-                auto &col = executorTreeRoot->cols()[i];
-                if (!used[i] && col.name == sel_col.col_name) {
-                    // 若存在表名前缀，需严格匹配（防止多表Join同名列如 t.id 和 d.id 冲突）
-                    if (!sel_col.tab_name.empty() && !col.tab_name.empty() && sel_col.tab_name != col.tab_name) {
-                        continue;
-                    }
-                    mapped_cols.push_back(col);
-                    used[i] = true;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                all_found = false;
-                break;
-            }
-        }
-
-        if (all_found) {
-            actual_cols = mapped_cols;
-            for (auto &sel_col : sel_cols) {
-                captions.push_back(sel_col.col_name);
-            }
-        } else {
-            // 当存在聚集函数别名 (如 MAX(id) as max_id) 时，直接信任下层算子吐出的原生 Schema
-            actual_cols = executorTreeRoot->cols();
-            if (actual_cols.size() == sel_cols.size()) {
-                for (auto &sel_col : sel_cols) { captions.push_back(sel_col.col_name); }
-            } else {
-                for (auto &col : actual_cols) { captions.push_back(col.name); }
-            }
-        }
+    captions.reserve(actual_cols.size());
+    for (auto &col : actual_cols) {
+        captions.push_back(col.name);
     }
 
     // Print header into buffer
@@ -197,25 +156,21 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
 
     // Print records
     size_t num_rec = 0;
-    // 执行query_plan
     for (executorTreeRoot->beginTuple(); !executorTreeRoot->is_end(); executorTreeRoot->nextTuple()) {
         auto Tuple = executorTreeRoot->Next();
         if (Tuple == nullptr) continue;
         std::vector<std::string> columns;
-        
-        for (auto &col : actual_cols) {
+        for (const auto &col : actual_cols) {
             std::string col_str;
-            char *rec_buf = Tuple->data + col.offset;
+            const char *rec_buf = Tuple->data + col.offset;
             if (col.type == TYPE_INT) {
                 col_str = std::to_string(*(int *)rec_buf);
             } else if (col.type == TYPE_FLOAT) {
                 col_str = std::to_string(*(float *)rec_buf);
             } else if (col.type == TYPE_STRING) {
-                // 安全的定长字符串截断
+                // 安全截断：找到第一个\0或到col.len
                 int len = 0;
-                while (len < col.len && rec_buf[len] != '\0') {
-                    len++;
-                }
+                while (len < col.len && rec_buf[len] != '\0') len++;
                 col_str = std::string((char *)rec_buf, len);
             }
             columns.push_back(col_str);
