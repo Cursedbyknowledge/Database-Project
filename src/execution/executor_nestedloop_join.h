@@ -31,7 +31,7 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     bool eval_join_cond(const Condition &cond) {
         const char *lhs_ptr = nullptr;
         const char *rhs_ptr = nullptr;
-        ColType lhs_type;
+        ColType lhs_type = TYPE_INT;  // 初始化防止未定义行为
 
         for (auto &col : cols_) {
             if (col.tab_name == cond.lhs_col.tab_name && col.name == cond.lhs_col.col_name) {
@@ -44,6 +44,7 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
                 break;
             }
         }
+        if (!lhs_ptr) return true;  // 列不存在，跳过该条件
 
         if (cond.is_rhs_val) {
             if (lhs_type == TYPE_INT) {
@@ -82,7 +83,6 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
             }
             return true;
         } else {
-            ColType rhs_type;
             for (auto &col : cols_) {
                 if (col.tab_name == cond.rhs_col.tab_name && col.name == cond.rhs_col.col_name) {
                     if (col.offset < (int)left_->tupleLen()) {
@@ -90,10 +90,10 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
                     } else {
                         rhs_ptr = right_rec_->data + (col.offset - left_->tupleLen());
                     }
-                    rhs_type = col.type;
                     break;
                 }
             }
+            if (!rhs_ptr) return true;  // rhs列不存在，跳过该条件
             if (lhs_type == TYPE_INT) {
                 int lhs_val = *(int *)lhs_ptr;
                 int rhs_val = *(int *)rhs_ptr;
