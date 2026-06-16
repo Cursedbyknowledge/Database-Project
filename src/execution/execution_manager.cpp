@@ -142,28 +142,18 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     int old_offset = *(context->offset_);
 
     // 列名始终从执行器获取，保证与数据列顺序一致
-    // ProjectionExecutor已为非SELECT*查询按用户指定顺序重排列
-    // SELECT*时保持NLJ/Scan的实际列顺序
     std::vector<std::string> captions;
     for (auto &col : executorTreeRoot->cols()) {
         captions.push_back(col.name);
     }
 
-    // Print header into buffer
+    // Print header into buffer (RecordPrinter格式→客户端+output.txt)
     RecordPrinter rec_printer(captions.size());
     rec_printer.print_separator(context);
     rec_printer.print_record(captions, context);
     rec_printer.print_separator(context);
-    // 直接写output.txt表头（管道格式，对齐参考实现）
-    std::fstream outfile;
-    outfile.open("output.txt", std::ios::out | std::ios::app);
-    outfile << "|";
-    for (size_t i = 0; i < captions.size(); ++i) {
-        outfile << " " << captions[i] << " |";
-    }
-    outfile << "\n";
 
-    // Print records
+    // Print records (统一RecordPrinter格式)
     size_t num_rec = 0;
     for (executorTreeRoot->beginTuple(); !executorTreeRoot->is_end(); executorTreeRoot->nextTuple()) {
         auto Tuple = executorTreeRoot->Next();
@@ -177,31 +167,25 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
             } else if (col.type == TYPE_FLOAT) {
                 col_str = std::to_string(*(float *)rec_buf);
             } else if (col.type == TYPE_STRING) {
-                // 安全截断：找到第一个\0或到col.len
                 int len = 0;
                 while (len < col.len && rec_buf[len] != '\0') len++;
                 col_str = std::string((char *)rec_buf, len);
             }
             columns.push_back(col_str);
         }
-        // 写入客户端缓冲区（RecordPrinter格式）
         rec_printer.print_record(columns, context);
-        // 直接写output.txt（管道格式）
-        outfile << "|";
-        for (size_t i = 0; i < columns.size(); ++i) {
-            outfile << " " << columns[i] << " |";
-        }
-        outfile << "\n";
         num_rec++;
-        if (num_rec > 100000) {  // 安全阀：防止无限循环耗尽内存
-            std::cerr << "WARNING: select_from loop exceeded 100000 records, breaking" << std::endl;
-            break;
-        }
+        if (num_rec > 100000) { break; }
     }
-    outfile.close();
     
     rec_printer.print_separator(context);
     RecordPrinter::print_record_count(num_rec, context);
+
+    // 统一输出到output.txt（RecordPrinter格式，与DDL/Utility一致）
+    int new_offset = *(context->offset_);
+    if (new_offset > old_offset) {
+        write_to_output(sm_manager_, std::string(context->data_send_ + old_offset, new_offset - old_offset));
+    }
 }
 
 // 自由函数：序列化计划树
