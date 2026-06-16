@@ -140,15 +140,16 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     }
 
     void advance_to_match() {
+        int safety = 0;
         while (true) {
             while (!right_->is_end()) {
                 right_rec_ = right_->Next();
                 if (right_rec_ && eval_conds()) return;
                 right_->nextTuple();
+                if (++safety > 100000) { isend = true; return; }
             }
             left_->nextTuple();
             if (left_->is_end()) { isend = true; return; }
-            // 跳过左表被过滤的记录
             while (!left_->is_end()) {
                 left_rec_ = left_->Next();
                 if (left_rec_) break;
@@ -156,6 +157,7 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
             }
             if (left_->is_end()) { isend = true; return; }
             right_->beginTuple();
+            if (++safety > 100000) { isend = true; return; }
         }
     }
 
