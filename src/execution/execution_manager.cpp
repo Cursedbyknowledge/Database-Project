@@ -9,8 +9,11 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
 #include "execution_manager.h"
-#include <map>
+#include <algorithm>
 #include <fstream>
+#include <iomanip>
+#include <map>
+#include <sstream>
 #include "executor_delete.h"
 #include "executor_index_scan.h"
 #include "executor_insert.h"
@@ -45,7 +48,7 @@ const char *help_info = "Supported SQL syntax:\n"
                    "selector:\n"
                    "  {* | column [, column ...]}\n";
 
-// 【统一输出拦截器：双保险路径策略】
+// 统一输出拦截器：双保险路径策略
 static void write_to_output(SmManager* sm_manager, const std::string& output_str) {
     if (output_str.empty()) return;
     
@@ -138,13 +141,11 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
                             Context *context) {
     int old_offset = *(context->offset_);
 
-    // 列名和列元数据统一从执行器获取，保证与数据列顺序一致
+    // 列名始终从执行器获取，保证与数据列顺序一致
     // ProjectionExecutor已为非SELECT*查询按用户指定顺序重排列
-    // SELECT*时保持底层算子的实际列顺序
-    auto &actual_cols = executorTreeRoot->cols();
+    // SELECT*时保持NLJ/Scan的实际列顺序
     std::vector<std::string> captions;
-    captions.reserve(actual_cols.size());
-    for (auto &col : actual_cols) {
+    for (auto &col : executorTreeRoot->cols()) {
         captions.push_back(col.name);
     }
 
@@ -160,9 +161,9 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
         auto Tuple = executorTreeRoot->Next();
         if (Tuple == nullptr) continue;
         std::vector<std::string> columns;
-        for (const auto &col : actual_cols) {
+        for (auto &col : executorTreeRoot->cols()) {
             std::string col_str;
-            const char *rec_buf = Tuple->data + col.offset;
+            char *rec_buf = Tuple->data + col.offset;
             if (col.type == TYPE_INT) {
                 col_str = std::to_string(*(int *)rec_buf);
             } else if (col.type == TYPE_FLOAT) {
@@ -177,12 +178,15 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
         }
         rec_printer.print_record(columns, context);
         num_rec++;
+        if (num_rec > 100000) {  // 安全阀：防止无限循环耗尽内存
+            std::cerr << "WARNING: select_from loop exceeded 100000 records, breaking" << std::endl;
+            break;
+        }
     }
     
     rec_printer.print_separator(context);
     RecordPrinter::print_record_count(num_rec, context);
 
-    // 拦截输出到文件
     int new_offset = *(context->offset_);
     if (new_offset > old_offset) {
         write_to_output(sm_manager_, std::string(context->data_send_ + old_offset, new_offset - old_offset));
@@ -193,9 +197,15 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
 static void explain_plan(std::shared_ptr<Plan> p, int indent,
                          const std::map<const Plan*, int>& rows_map,
                          const std::map<const Plan*, int>& out_rows_map,
-                         std::string& out) {
+                         std::string& out,
+                         const std::map<std::string, std::string>& alias_map) {
     int rows = rows_map.count(p.get()) ? rows_map.at(p.get()) : 0;
     int out_rows = out_rows_map.count(p.get()) ? out_rows_map.at(p.get()) : rows;
+    // 别名查找：若有别名则用别名，否则用原表名
+    auto alias_for = [&](const std::string& real) -> std::string {
+        auto it = alias_map.find(real);
+        return (it != alias_map.end()) ? it->second : real;
+    };
     
     if (auto sp = std::dynamic_pointer_cast<ScanPlan>(p)) {
         if (!sp->fed_conds_.empty()) {
@@ -208,7 +218,7 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
             for (size_t i = 0; i < sorted_conds.size(); i++) {
                 if (i) out += ", ";
                 auto &c = sorted_conds[i];
-                out += c.lhs_col.tab_name + "." + c.lhs_col.col_name;
+                out += alias_for(c.lhs_col.tab_name) + "." + c.lhs_col.col_name;
                 switch (c.op) {
                     case OP_EQ: out += "="; break; case OP_NE: out += "<>"; break;
                     case OP_LT: out += "<"; break; case OP_GT: out += ">"; break;
@@ -216,7 +226,16 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
                 }
                 if (c.is_rhs_val) {
                     if (c.rhs_val.type == TYPE_INT) out += std::to_string(*(int*)c.rhs_val.raw->data);
-                    else if (c.rhs_val.type == TYPE_FLOAT) out += std::to_string(*(float*)c.rhs_val.raw->data);
+                    else if (c.rhs_val.type == TYPE_FLOAT) {
+                        float fv = *(float*)c.rhs_val.raw->data;
+                        std::ostringstream oss;
+                        oss << std::fixed << std::setprecision(6) << fv;
+                        std::string s = oss.str();
+                        // 去除尾随零
+                        s.erase(s.find_last_not_of('0') + 1, std::string::npos);
+                        if (s.back() == '.') s.pop_back();
+                        out += s;
+                    }
                     else out += c.rhs_val.str_val;
                 }
             }
@@ -249,17 +268,23 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
         std::sort(tabs.begin(), tabs.end());
         for (size_t i = 0; i < tabs.size(); i++) { if (i) out += ", "; out += tabs[i]; }
         out += "], condition=[";
-        for (size_t i = 0; i < jp->conds_.size(); i++) {
+        // Join条件按字典序排序
+        auto sorted_join_conds = jp->conds_;
+        std::sort(sorted_join_conds.begin(), sorted_join_conds.end(), [](auto &a, auto &b) {
+            return (a.lhs_col.tab_name + "." + a.lhs_col.col_name) <
+                   (b.lhs_col.tab_name + "." + b.lhs_col.col_name);
+        });
+        for (size_t i = 0; i < sorted_join_conds.size(); i++) {
             if (i) out += ", ";
-            out += jp->conds_[i].lhs_col.tab_name + "." + jp->conds_[i].lhs_col.col_name;
-            out += "=" + jp->conds_[i].rhs_col.tab_name + "." + jp->conds_[i].rhs_col.col_name;
+            out += alias_for(sorted_join_conds[i].lhs_col.tab_name) + "." + sorted_join_conds[i].lhs_col.col_name;
+            out += "=" + alias_for(sorted_join_conds[i].rhs_col.tab_name) + "." + sorted_join_conds[i].rhs_col.col_name;
         }
         out += "], rows=" + std::to_string(rows) + ")\n";
-        explain_plan(jp->left_, indent + 1, rows_map, out_rows_map, out);
-        explain_plan(jp->right_, indent + 1, rows_map, out_rows_map, out);
+        explain_plan(jp->left_, indent + 1, rows_map, out_rows_map, out, alias_map);
+        explain_plan(jp->right_, indent + 1, rows_map, out_rows_map, out, alias_map);
     } else if (auto pp = std::dynamic_pointer_cast<ProjectionPlan>(p)) {
         out += std::string(indent, '\t') + "Project(columns=[";
-        if (pp->sel_cols_.empty() || (pp->sel_cols_.size() == 1 && pp->sel_cols_[0].col_name == "*")) {
+        if (pp->is_star_ || pp->sel_cols_.empty() || (pp->sel_cols_.size() == 1 && pp->sel_cols_[0].col_name == "*")) {
             out += "*";
         } else {
             auto cols = pp->sel_cols_;
@@ -268,11 +293,11 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
             });
             for (size_t i = 0; i < cols.size(); i++) {
                 if (i) out += ", ";
-                out += cols[i].tab_name + "." + cols[i].col_name;
+                out += alias_for(cols[i].tab_name) + "." + cols[i].col_name;
             }
         }
         out += "], rows=" + std::to_string(rows) + ")\n";
-        explain_plan(pp->subplan_, indent + 1, rows_map, out_rows_map, out);
+        explain_plan(pp->subplan_, indent + 1, rows_map, out_rows_map, out, alias_map);
     }
 }
 
@@ -282,8 +307,13 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
                                 std::vector<TabCol> sel_cols, Context *context) {
     int old_offset = *(context->offset_);
 
+    int safety = 0;
     for (executorTreeRoot->beginTuple(); !executorTreeRoot->is_end(); executorTreeRoot->nextTuple()) {
         executorTreeRoot->Next();
+        if (++safety > 100000) {
+            std::cerr << "WARNING: explain_select loop exceeded 100000, breaking" << std::endl;
+            break;
+        }
     }
     
     std::map<const Plan*, int> rows_map, out_rows_map;
@@ -305,7 +335,7 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
     collect(plan, executorTreeRoot.get());
     
     std::string out;
-    explain_plan(plan, 0, rows_map, out_rows_map, out);
+    explain_plan(plan, 0, rows_map, out_rows_map, out, context->rev_alias_map_);
     
     int write_len = std::min(out.size(), (size_t)BUFFER_LENGTH - 1 - old_offset);
     memcpy(context->data_send_ + old_offset, out.c_str(), write_len);
