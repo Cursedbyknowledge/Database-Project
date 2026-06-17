@@ -128,55 +128,54 @@ void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Co
 // 执行select语句
 void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, std::vector<TabCol> sel_cols, 
                             Context *context) {
-    int old_offset = *(context->offset_);
+    auto &cols = executorTreeRoot->cols();
 
     std::vector<std::string> captions;
-    // 绝对信任下层算子生成的 schema
-    for (auto &col : executorTreeRoot->cols()) {
-        captions.push_back(col.name);
-    }
+    for (auto &col : cols) captions.push_back(col.name);
 
-    // 利用官方组件排版
+    // === 客户端输出：RecordPrinter 带边框格式 ===
     RecordPrinter rec_printer(captions.size());
     rec_printer.print_separator(context);
     rec_printer.print_record(captions, context);
     rec_printer.print_separator(context);
 
+    // === output.txt 输出：纯 pipe 格式（CI 评测标准） ===
+    std::string out = "|";
+    for (auto &cap : captions) out += " " + cap + " |";
+    out += "\n";
+
     size_t num_rec = 0;
     for (executorTreeRoot->beginTuple(); !executorTreeRoot->is_end(); executorTreeRoot->nextTuple()) {
         auto Tuple = executorTreeRoot->Next();
         if (Tuple == nullptr) continue;
-        
+
         std::vector<std::string> columns;
-        for (auto &col : executorTreeRoot->cols()) {
+        out += "|";
+        for (auto &col : cols) {
             std::string col_str;
-            char *rec_buf = Tuple->data + col.offset;
-            if (col.type == TYPE_INT) {
+            const char *rec_buf = Tuple->data + col.offset;
+            if (col.type == TYPE_INT)
                 col_str = std::to_string(*(int *)rec_buf);
-            } else if (col.type == TYPE_FLOAT) {
-                // 强制格式化为 6 位小数
-                char buf[32];
-                snprintf(buf, sizeof(buf), "%.6f", *(float *)rec_buf);
-                col_str = buf;
-            } else if (col.type == TYPE_STRING) {
+            else if (col.type == TYPE_FLOAT)
+                col_str = std::to_string(*(float *)rec_buf);
+            else if (col.type == TYPE_STRING) {
                 int len = 0;
                 while (len < col.len && rec_buf[len] != '\0') len++;
-                col_str = std::string((char *)rec_buf, len);
+                col_str = std::string(rec_buf, len);
             }
             columns.push_back(col_str);
+            out += " " + col_str + " |";
         }
+        out += "\n";
         rec_printer.print_record(columns, context);
         num_rec++;
+        if (num_rec > 100000) break;
     }
-    
+
     rec_printer.print_separator(context);
     RecordPrinter::print_record_count(num_rec, context);
 
-    // 【截获！将官方打印的全套边框写入文件】
-    int new_offset = *(context->offset_);
-    if (new_offset > old_offset) {
-        write_to_output(sm_manager_, std::string(context->data_send_ + old_offset, new_offset - old_offset));
-    }
+    write_to_output(sm_manager_, out);
 }
 
 // 独立的计划解析函数
@@ -256,31 +255,47 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
     }
 }
 
-// EXPLAIN ANALYZE
+// EXPLAIN ANALYZE: 执行计划并输出计划树
 void QlManager::explain_select(std::shared_ptr<Plan> plan,
                                 std::unique_ptr<AbstractExecutor> executorTreeRoot,
                                 std::vector<TabCol> sel_cols, Context *context) {
-    int old_offset = *(context->offset_);
-
+    // 先跑一遍完整执行，驱动所有 executor 收集 runtime_rows_
     for (executorTreeRoot->beginTuple(); !executorTreeRoot->is_end(); executorTreeRoot->nextTuple()) {
         executorTreeRoot->Next();
     }
-    
+
+    // 从 executor 树收集运行时行数
     std::map<const Plan*, int> rows_map;
+    std::function<void(std::shared_ptr<Plan>, AbstractExecutor*)> collect;
+    collect = [&](std::shared_ptr<Plan> p, AbstractExecutor* e) {
+        if (!p || !e) return;
+        rows_map[p.get()] = e->runtime_rows_;
+        auto children = e->get_children();
+        if (auto pp = std::dynamic_pointer_cast<ProjectionPlan>(p)) {
+            if (!children.empty()) collect(pp->subplan_, children[0]);
+        } else if (auto jp = std::dynamic_pointer_cast<JoinPlan>(p)) {
+            if (children.size() >= 2) {
+                collect(jp->left_, children[0]);
+                collect(jp->right_, children[1]);
+            }
+        }
+    };
+    collect(plan, executorTreeRoot.get());
+
     std::string out;
     explain_plan(plan, 0, rows_map, out);
-    
+
+    // 写入 client buffer
     int write_len = std::min(out.size(), (size_t)BUFFER_LENGTH - 1 - *(context->offset_));
     memcpy(context->data_send_ + *(context->offset_), out.c_str(), write_len);
     *(context->offset_) += write_len;
-    
-    int new_offset = *(context->offset_);
-    if (new_offset > old_offset) {
-        write_to_output(sm_manager_, std::string(context->data_send_ + old_offset, new_offset - old_offset));
-    }
+
+    // 写入 output.txt
+    write_to_output(sm_manager_, out);
 }
 
 // 执行DML语句
 void QlManager::run_dml(std::unique_ptr<AbstractExecutor> exec){
+    exec->beginTuple();
     exec->Next();
 }
