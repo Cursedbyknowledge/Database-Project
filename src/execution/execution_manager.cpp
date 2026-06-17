@@ -48,7 +48,7 @@ const char *help_info = "Supported SQL syntax:\n"
                    "selector:\n"
                    "  {* | column [, column ...]}\n";
 
-// 统一输出拦截器：双保险路径策略
+// 【拦截器】：将原汁原味的格式追加到输出文件
 static void write_to_output(SmManager* sm_manager, const std::string& output_str) {
     if (output_str.empty()) return;
     
@@ -68,7 +68,7 @@ static void write_to_output(SmManager* sm_manager, const std::string& output_str
     }
 }
 
-// 主要负责执行DDL语句
+// 执行DDL语句
 void QlManager::run_mutli_query(std::shared_ptr<Plan> plan, Context *context){
     int old_offset = *(context->offset_);
     if (auto x = std::dynamic_pointer_cast<DDLPlan>(plan)) {
@@ -91,7 +91,7 @@ void QlManager::run_mutli_query(std::shared_ptr<Plan> plan, Context *context){
     }
 }
 
-// 执行help; show tables; desc table; begin; commit; abort;语句
+// 执行工具类语句
 void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Context *context) {
     int old_offset = *(context->offset_);
 
@@ -139,68 +139,66 @@ void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Co
 // 执行select语句
 void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, std::vector<TabCol> sel_cols, 
                             Context *context) {
-    // 绝对信任根算子Schema：ProjectionExecutor已完美重排/裁剪列，offset准确对齐Tuple内存
-    auto &cols = executorTreeRoot->cols();
-    std::vector<std::string> captions;
-    for (auto &c : cols) captions.push_back(c.name);
+    int old_offset = *(context->offset_);
 
-    // 客户端输出（RecordPrinter格式，带边框）
+    std::vector<std::string> captions;
+    // 绝对信任 Projection 算子返回的 schema
+    for (auto &col : executorTreeRoot->cols()) {
+        captions.push_back(col.name);
+    }
+
     RecordPrinter rec_printer(captions.size());
     rec_printer.print_separator(context);
     rec_printer.print_record(captions, context);
     rec_printer.print_separator(context);
 
-    // output.txt 纯净表格输出
-    std::string out = "|";
-    for (auto &cap : captions) out += " " + cap + " |";
-    out += "\n";
-
     size_t num_rec = 0;
     for (executorTreeRoot->beginTuple(); !executorTreeRoot->is_end(); executorTreeRoot->nextTuple()) {
         auto Tuple = executorTreeRoot->Next();
         if (Tuple == nullptr) continue;
+        
         std::vector<std::string> columns;
-        out += "|";
-        for (auto &col : cols) {
+        for (auto &col : executorTreeRoot->cols()) {
             std::string col_str;
-            const char *rec_buf = Tuple->data + col.offset;
-            if (col.type == TYPE_INT)
+            char *rec_buf = Tuple->data + col.offset;
+            if (col.type == TYPE_INT) {
                 col_str = std::to_string(*(int *)rec_buf);
-            else if (col.type == TYPE_FLOAT)
+            } else if (col.type == TYPE_FLOAT) {
                 col_str = std::to_string(*(float *)rec_buf);
-            else if (col.type == TYPE_STRING) {
+            } else if (col.type == TYPE_STRING) {
                 int len = 0;
                 while (len < col.len && rec_buf[len] != '\0') len++;
-                col_str = std::string(rec_buf, len);
+                col_str = std::string((char *)rec_buf, len);
             }
             columns.push_back(col_str);
-            out += " " + col_str + " |";
         }
-        out += "\n";
         rec_printer.print_record(columns, context);
         num_rec++;
-        if (num_rec > 100000) break;
     }
+    
     rec_printer.print_separator(context);
     RecordPrinter::print_record_count(num_rec, context);
 
-    write_to_output(sm_manager_, out);
+    // 截获！写入到文件
+    int new_offset = *(context->offset_);
+    if (new_offset > old_offset) {
+        write_to_output(sm_manager_, std::string(context->data_send_ + old_offset, new_offset - old_offset));
+    }
 }
 
 // 自由函数：序列化计划树
 static void explain_plan(std::shared_ptr<Plan> p, int indent,
                          const std::map<const Plan*, int>& rows_map,
-                         const std::map<const Plan*, int>& out_rows_map,
+                         std::map<const Plan*, int>& out_rows_map,
                          std::string& out,
                          const std::map<std::string, std::string>& alias_map) {
     int rows = rows_map.count(p.get()) ? rows_map.at(p.get()) : 0;
     int out_rows = out_rows_map.count(p.get()) ? out_rows_map.at(p.get()) : rows;
-    // 别名查找：若有别名则用别名，否则用原表名
     auto alias_for = [&](const std::string& real) -> std::string {
         auto it = alias_map.find(real);
         return (it != alias_map.end()) ? it->second : real;
     };
-    
+
     if (auto sp = std::dynamic_pointer_cast<ScanPlan>(p)) {
         if (!sp->fed_conds_.empty()) {
             out += std::string(indent, '\t') + "Filter(condition=[";
@@ -225,7 +223,6 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
                         std::ostringstream oss;
                         oss << std::fixed << std::setprecision(6) << fv;
                         std::string s = oss.str();
-                        // 去除尾随零
                         s.erase(s.find_last_not_of('0') + 1, std::string::npos);
                         if (s.back() == '.') s.pop_back();
                         out += s;
@@ -262,7 +259,6 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
         std::sort(tabs.begin(), tabs.end());
         for (size_t i = 0; i < tabs.size(); i++) { if (i) out += ", "; out += tabs[i]; }
         out += "], condition=[";
-        // Join条件按字典序排序
         auto sorted_join_conds = jp->conds_;
         std::sort(sorted_join_conds.begin(), sorted_join_conds.end(), [](auto &a, auto &b) {
             return (a.lhs_col.tab_name + "." + a.lhs_col.col_name) <
@@ -301,13 +297,8 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
                                 std::vector<TabCol> sel_cols, Context *context) {
     int old_offset = *(context->offset_);
 
-    int safety = 0;
     for (executorTreeRoot->beginTuple(); !executorTreeRoot->is_end(); executorTreeRoot->nextTuple()) {
         executorTreeRoot->Next();
-        if (++safety > 100000) {
-            std::cerr << "WARNING: explain_select loop exceeded 100000, breaking" << std::endl;
-            break;
-        }
     }
     
     std::map<const Plan*, int> rows_map, out_rows_map;
@@ -335,13 +326,13 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
     memcpy(context->data_send_ + old_offset, out.c_str(), write_len);
     *(context->offset_) += write_len;
     
-    write_to_output(sm_manager_, out);
+    int new_offset = *(context->offset_);
+    if (new_offset > old_offset) {
+        write_to_output(sm_manager_, std::string(context->data_send_ + old_offset, new_offset - old_offset));
+    }
 }
 
-// 执行DML语句
+// 执行DML语句（回滚为最原本的代码，防污染）
 void QlManager::run_dml(std::unique_ptr<AbstractExecutor> exec){
-    // 【核心修复】：必须使用循环驱动火山模型，确保多行 Update/Delete 被完全执行！
-    for (exec->beginTuple(); !exec->is_end(); exec->nextTuple()) {
-        exec->Next();
-    }
+    exec->Next();
 }
