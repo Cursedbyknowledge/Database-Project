@@ -46,7 +46,7 @@ const char *help_info = "Supported SQL syntax:\n"
                    "selector:\n"
                    "  {* | column [, column ...]}\n";
 
-// 【专供评测机的无边框文件写入器】
+// 【拦截器：专供评测机的文件写入器】
 static void write_to_output(SmManager* sm_manager, const std::string& output_str) {
     if (output_str.empty()) return;
     
@@ -68,63 +68,36 @@ static void write_to_output(SmManager* sm_manager, const std::string& output_str
 
 // 执行DDL语句
 void QlManager::run_mutli_query(std::shared_ptr<Plan> plan, Context *context){
+    int old_offset = *(context->offset_);
     if (auto x = std::dynamic_pointer_cast<DDLPlan>(plan)) {
         switch(x->tag) {
-            case T_CreateTable:
-                sm_manager_->create_table(x->tab_name_, x->cols_, context); break;
-            case T_DropTable:
-                sm_manager_->drop_table(x->tab_name_, context); break;
-            case T_CreateIndex:
-                sm_manager_->create_index(x->tab_name_, x->tab_col_names_, context); break;
-            case T_DropIndex:
-                sm_manager_->drop_index(x->tab_name_, x->tab_col_names_, context); break;
-            default:
-                throw InternalError("Unexpected field type"); break;  
+            case T_CreateTable: sm_manager_->create_table(x->tab_name_, x->cols_, context); break;
+            case T_DropTable: sm_manager_->drop_table(x->tab_name_, context); break;
+            case T_CreateIndex: sm_manager_->create_index(x->tab_name_, x->tab_col_names_, context); break;
+            case T_DropIndex: sm_manager_->drop_index(x->tab_name_, x->tab_col_names_, context); break;
+            default: throw InternalError("Unexpected field type"); break;  
         }
+    }
+    int new_offset = *(context->offset_);
+    if (new_offset > old_offset) {
+        write_to_output(sm_manager_, std::string(context->data_send_ + old_offset, new_offset - old_offset));
     }
 }
 
 // 执行工具类语句
 void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Context *context) {
+    int old_offset = *(context->offset_);
+
     if (auto x = std::dynamic_pointer_cast<OtherPlan>(plan)) {
         switch(x->tag) {
             case T_Help:
                 memcpy(context->data_send_ + *(context->offset_), help_info, strlen(help_info));
                 *(context->offset_) += strlen(help_info);
                 break;
-            case T_ShowTable: {
-                sm_manager_->show_tables(context);
-                
-                // 【核心修复：避开私有变量 tabs_，使用完全公开的 fhs_ 获取表名】
-                std::vector<std::string> tab_names;
-                for (auto &entry : sm_manager_->fhs_) {
-                    tab_names.push_back(entry.first);
-                }
-                std::sort(tab_names.begin(), tab_names.end()); // 保证按字母顺序输出匹配测试用例
-                
-                std::string out = "| Tables |\n";
-                for (auto &name : tab_names) {
-                    out += "| " + name + " |\n";
-                }
-                write_to_output(sm_manager_, out);
-                break;
-            }
-            case T_ShowIndex: {
-                sm_manager_->show_index(x->tab_name_, context);
-                // 纯净格式输出
-                std::string out;
-                auto& tab = sm_manager_->db_.get_table(x->tab_name_); // get_table 是 public 方法
-                for (auto& idx : tab.indexes) {
-                    out += "| " + x->tab_name_ + " | unique | (";
-                    for (size_t i = 0; i < idx.cols.size(); i++) {
-                        if (i) out += ",";
-                        out += idx.cols[i].name; 
-                    }
-                    out += ") |\n";
-                }
-                write_to_output(sm_manager_, out);
-                break;
-            }
+            case T_ShowTable:
+                sm_manager_->show_tables(context); break;
+            case T_ShowIndex:
+                sm_manager_->show_index(x->tab_name_, context); break;
             case T_DescTable:
                 sm_manager_->desc_table(x->tab_name_, context); break;
             case T_Transaction_begin:
@@ -136,39 +109,34 @@ void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Co
             case T_Transaction_abort:
                 context->txn_ = txn_mgr_->get_transaction(*txn_id);
                 txn_mgr_->abort(context->txn_, context->log_mgr_); break;
-            default:
-                throw InternalError("Unexpected field type"); break;                        
+            default: throw InternalError("Unexpected field type"); break;                        
         }
     } else if(auto x = std::dynamic_pointer_cast<SetKnobPlan>(plan)) {
         switch (x->set_knob_type_) {
-        case ast::SetKnobType::EnableNestLoop: 
-            planner_->set_enable_nestedloop_join(x->bool_value_); break;
-        case ast::SetKnobType::EnableSortMerge: 
-            planner_->set_enable_sortmerge_join(x->bool_value_); break;
-        default: 
-            throw RMDBError("Not implemented!\n"); break;
+            case ast::SetKnobType::EnableNestLoop: planner_->set_enable_nestedloop_join(x->bool_value_); break;
+            case ast::SetKnobType::EnableSortMerge: planner_->set_enable_sortmerge_join(x->bool_value_); break;
+            default: throw RMDBError("Not implemented!\n"); break;
         }
+    }
+
+    int new_offset = *(context->offset_);
+    if (new_offset > old_offset) {
+        write_to_output(sm_manager_, std::string(context->data_send_ + old_offset, new_offset - old_offset));
     }
 }
 
 // 执行select语句
 void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, std::vector<TabCol> sel_cols, 
                             Context *context) {
+    int old_offset = *(context->offset_);
+
     std::vector<std::string> captions;
-    
     // 绝对信任下层算子生成的 schema
     for (auto &col : executorTreeRoot->cols()) {
         captions.push_back(col.name);
     }
 
-    // 手写生成纯净 Markdown 表头用于文件输出
-    std::string out = "|";
-    for (auto &cap : captions) {
-        out += " " + cap + " |";
-    }
-    out += "\n";
-
-    // 维持客户端打印不变
+    // 利用官方组件排版
     RecordPrinter rec_printer(captions.size());
     rec_printer.print_separator(context);
     rec_printer.print_record(captions, context);
@@ -180,15 +148,13 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
         if (Tuple == nullptr) continue;
         
         std::vector<std::string> columns;
-        out += "|"; 
-        
         for (auto &col : executorTreeRoot->cols()) {
             std::string col_str;
             char *rec_buf = Tuple->data + col.offset;
             if (col.type == TYPE_INT) {
                 col_str = std::to_string(*(int *)rec_buf);
             } else if (col.type == TYPE_FLOAT) {
-                // 严格保证 6 位小数
+                // 强制格式化为 6 位小数
                 char buf[32];
                 snprintf(buf, sizeof(buf), "%.6f", *(float *)rec_buf);
                 col_str = buf;
@@ -198,10 +164,7 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
                 col_str = std::string((char *)rec_buf, len);
             }
             columns.push_back(col_str);
-            out += " " + col_str + " |"; 
         }
-        out += "\n";
-        
         rec_printer.print_record(columns, context);
         num_rec++;
     }
@@ -209,8 +172,11 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     rec_printer.print_separator(context);
     RecordPrinter::print_record_count(num_rec, context);
 
-    // 将不带任何边框干扰的纯净数据写入文件
-    write_to_output(sm_manager_, out);
+    // 【截获！将官方打印的全套边框写入文件】
+    int new_offset = *(context->offset_);
+    if (new_offset > old_offset) {
+        write_to_output(sm_manager_, std::string(context->data_send_ + old_offset, new_offset - old_offset));
+    }
 }
 
 // 独立的计划解析函数
@@ -294,6 +260,8 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
 void QlManager::explain_select(std::shared_ptr<Plan> plan,
                                 std::unique_ptr<AbstractExecutor> executorTreeRoot,
                                 std::vector<TabCol> sel_cols, Context *context) {
+    int old_offset = *(context->offset_);
+
     for (executorTreeRoot->beginTuple(); !executorTreeRoot->is_end(); executorTreeRoot->nextTuple()) {
         executorTreeRoot->Next();
     }
@@ -306,7 +274,10 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
     memcpy(context->data_send_ + *(context->offset_), out.c_str(), write_len);
     *(context->offset_) += write_len;
     
-    write_to_output(sm_manager_, out);
+    int new_offset = *(context->offset_);
+    if (new_offset > old_offset) {
+        write_to_output(sm_manager_, std::string(context->data_send_ + old_offset, new_offset - old_offset));
+    }
 }
 
 // 执行DML语句
