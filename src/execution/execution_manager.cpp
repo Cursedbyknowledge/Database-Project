@@ -139,59 +139,52 @@ void QlManager::run_cmd_utility(std::shared_ptr<Plan> plan, txn_id_t *txn_id, Co
 // 执行select语句
 void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, std::vector<TabCol> sel_cols, 
                             Context *context) {
-    int old_offset = *(context->offset_);
-
-    // 列名从sel_cols获取（保持与参考实现一致）
+    // 绝对信任根算子Schema：ProjectionExecutor已完美重排/裁剪列，offset准确对齐Tuple内存
+    auto &cols = executorTreeRoot->cols();
     std::vector<std::string> captions;
-    if (sel_cols.size() == 1 && sel_cols[0].col_name == "*") {
-        for (auto &col : executorTreeRoot->cols()) {
-            captions.push_back(col.name);
-        }
-    } else {
-        for (auto &sel_col : sel_cols) {
-            captions.push_back(sel_col.col_name);
-        }
-    }
+    for (auto &c : cols) captions.push_back(c.name);
 
-    // Print header into buffer (RecordPrinter格式→客户端+output.txt)
+    // 客户端输出（RecordPrinter格式，带边框）
     RecordPrinter rec_printer(captions.size());
     rec_printer.print_separator(context);
     rec_printer.print_record(captions, context);
     rec_printer.print_separator(context);
 
-    // Print records (统一RecordPrinter格式)
+    // output.txt 纯净表格输出
+    std::string out = "|";
+    for (auto &cap : captions) out += " " + cap + " |";
+    out += "\n";
+
     size_t num_rec = 0;
     for (executorTreeRoot->beginTuple(); !executorTreeRoot->is_end(); executorTreeRoot->nextTuple()) {
         auto Tuple = executorTreeRoot->Next();
         if (Tuple == nullptr) continue;
         std::vector<std::string> columns;
-        for (auto &col : executorTreeRoot->cols()) {
+        out += "|";
+        for (auto &col : cols) {
             std::string col_str;
-            char *rec_buf = Tuple->data + col.offset;
-            if (col.type == TYPE_INT) {
+            const char *rec_buf = Tuple->data + col.offset;
+            if (col.type == TYPE_INT)
                 col_str = std::to_string(*(int *)rec_buf);
-            } else if (col.type == TYPE_FLOAT) {
+            else if (col.type == TYPE_FLOAT)
                 col_str = std::to_string(*(float *)rec_buf);
-            } else if (col.type == TYPE_STRING) {
+            else if (col.type == TYPE_STRING) {
                 int len = 0;
                 while (len < col.len && rec_buf[len] != '\0') len++;
-                col_str = std::string((char *)rec_buf, len);
+                col_str = std::string(rec_buf, len);
             }
             columns.push_back(col_str);
+            out += " " + col_str + " |";
         }
+        out += "\n";
         rec_printer.print_record(columns, context);
         num_rec++;
-        if (num_rec > 100000) { break; }
+        if (num_rec > 100000) break;
     }
-    
     rec_printer.print_separator(context);
     RecordPrinter::print_record_count(num_rec, context);
 
-    // 统一输出到output.txt（RecordPrinter格式，与DDL/Utility一致）
-    int new_offset = *(context->offset_);
-    if (new_offset > old_offset) {
-        write_to_output(sm_manager_, std::string(context->data_send_ + old_offset, new_offset - old_offset));
-    }
+    write_to_output(sm_manager_, out);
 }
 
 // 自由函数：序列化计划树
