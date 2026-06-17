@@ -31,10 +31,11 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     bool eval_join_cond(const Condition &cond) {
         const char *lhs_ptr = nullptr;
         const char *rhs_ptr = nullptr;
-        ColType lhs_type = TYPE_INT;  // 初始化防止未定义行为
+        ColType lhs_type = TYPE_INT;
 
+        // 智能列名匹配：如果查询没有指定表名前缀(empty)，则直接按照列名(col_name)匹配
         for (auto &col : cols_) {
-            if (col.tab_name == cond.lhs_col.tab_name && col.name == cond.lhs_col.col_name) {
+            if ((cond.lhs_col.tab_name.empty() || col.tab_name == cond.lhs_col.tab_name) && col.name == cond.lhs_col.col_name) {
                 if (col.offset < (int)left_->tupleLen()) {
                     lhs_ptr = left_rec_->data + col.offset;
                 } else {
@@ -44,7 +45,7 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
                 break;
             }
         }
-        if (!lhs_ptr) return true;  // 列不存在，跳过该条件
+        if (!lhs_ptr) return true;
 
         if (cond.is_rhs_val) {
             if (lhs_type == TYPE_INT) {
@@ -70,7 +71,16 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
                     case OP_GE: return lhs_val >= rhs_val;
                 }
             } else if (lhs_type == TYPE_STRING) {
-                std::string lhs_val(lhs_ptr, strnlen(lhs_ptr, 256));
+                int max_len = 255;
+                for (auto &col : cols_) {
+                    if ((cond.lhs_col.tab_name.empty() || col.tab_name == cond.lhs_col.tab_name) && col.name == cond.lhs_col.col_name) {
+                        max_len = col.len;
+                        break;
+                    }
+                }
+                int len = 0;
+                while (len < max_len && lhs_ptr[len] != '\0') len++;
+                std::string lhs_val(lhs_ptr, len);
                 std::string rhs_val = cond.rhs_val.str_val;
                 switch (cond.op) {
                     case OP_EQ: return lhs_val == rhs_val;
@@ -83,17 +93,22 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
             }
             return true;
         } else {
+            ColType rhs_type = TYPE_INT;
+            int rhs_max_len = 255;
             for (auto &col : cols_) {
-                if (col.tab_name == cond.rhs_col.tab_name && col.name == cond.rhs_col.col_name) {
+                if ((cond.rhs_col.tab_name.empty() || col.tab_name == cond.rhs_col.tab_name) && col.name == cond.rhs_col.col_name) {
                     if (col.offset < (int)left_->tupleLen()) {
                         rhs_ptr = left_rec_->data + col.offset;
                     } else {
                         rhs_ptr = right_rec_->data + (col.offset - left_->tupleLen());
                     }
+                    rhs_type = col.type;
+                    rhs_max_len = col.len;
                     break;
                 }
             }
-            if (!rhs_ptr) return true;  // rhs列不存在，跳过该条件
+            if (!rhs_ptr) return true;
+
             if (lhs_type == TYPE_INT) {
                 int lhs_val = *(int *)lhs_ptr;
                 int rhs_val = *(int *)rhs_ptr;
@@ -117,8 +132,17 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
                     case OP_GE: return lhs_val >= rhs_val;
                 }
             } else if (lhs_type == TYPE_STRING) {
-                std::string lhs_val(lhs_ptr, strnlen(lhs_ptr, 256));
-                std::string rhs_val(rhs_ptr, strnlen(rhs_ptr, 256));
+                int lhs_max_len = 255;
+                for (auto &col : cols_) {
+                    if ((cond.lhs_col.tab_name.empty() || col.tab_name == cond.lhs_col.tab_name) && col.name == cond.lhs_col.col_name) {
+                        lhs_max_len = col.len; break;
+                    }
+                }
+                int llen = 0; while (llen < lhs_max_len && lhs_ptr[llen] != '\0') llen++;
+                int rlen = 0; while (rlen < rhs_max_len && rhs_ptr[rlen] != '\0') rlen++;
+                
+                std::string lhs_val(lhs_ptr, llen);
+                std::string rhs_val(rhs_ptr, rlen);
                 switch (cond.op) {
                     case OP_EQ: return lhs_val == rhs_val;
                     case OP_NE: return lhs_val != rhs_val;
@@ -139,26 +163,35 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         return true;
     }
 
+    // 极简的迭代状态机
     void advance_to_match() {
         int safety = 0;
-        while (true) {
-            while (!right_->is_end()) {
-                right_rec_ = right_->Next();
-                if (right_rec_ && eval_conds()) return;
-                right_->nextTuple();
-                if (++safety > 100000) { isend = true; return; }
+        while (!left_->is_end()) {
+            if (left_rec_ != nullptr) {
+                while (!right_->is_end()) {
+                    right_rec_ = right_->Next();
+                    if (right_rec_ != nullptr && eval_conds()) {
+                        return;
+                    }
+                    right_->nextTuple();
+                    if (++safety > 100000) { isend = true; return; }
+                }
             }
+            
             left_->nextTuple();
-            if (left_->is_end()) { isend = true; return; }
             while (!left_->is_end()) {
                 left_rec_ = left_->Next();
-                if (left_rec_) break;
+                if (left_rec_ != nullptr) break;
                 left_->nextTuple();
+                if (++safety > 100000) { isend = true; return; }
             }
-            if (left_->is_end()) { isend = true; return; }
-            right_->beginTuple();
+            
+            if (!left_->is_end()) {
+                right_->beginTuple();
+            }
             if (++safety > 100000) { isend = true; return; }
         }
+        isend = true;
     }
 
    public:
@@ -179,33 +212,27 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     }
 
     void beginTuple() override {
-        left_->beginTuple();
-        right_->beginTuple();
         isend = false;
-        // 跳过左表被过滤的记录
+        left_->beginTuple();
+        
         while (!left_->is_end()) {
             left_rec_ = left_->Next();
-            if (left_rec_) break;
+            if (left_rec_ != nullptr) break;
             left_->nextTuple();
         }
-        if (left_->is_end()) { isend = true; return; }
+        
+        if (left_->is_end()) {
+            isend = true;
+            return;
+        }
+        
+        right_->beginTuple();
         advance_to_match();
     }
 
     void nextTuple() override {
+        if (isend) return;
         right_->nextTuple();
-        if (right_->is_end()) {
-            left_->nextTuple();
-            if (left_->is_end()) { isend = true; return; }
-            // 跳过左表被过滤的记录
-            while (!left_->is_end()) {
-                left_rec_ = left_->Next();
-                if (left_rec_) break;
-                left_->nextTuple();
-            }
-            if (left_->is_end()) { isend = true; return; }
-            right_->beginTuple();
-        }
         advance_to_match();
     }
 
@@ -214,8 +241,10 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     }
 
     std::unique_ptr<RmRecord> Next() override {
+        if (isend) return nullptr;
         runtime_rows_++;
         runtime_output_++;
+        
         auto record = std::make_unique<RmRecord>(len_);
         memcpy(record->data, left_rec_->data, left_->tupleLen());
         memcpy(record->data + left_->tupleLen(), right_rec_->data, right_->tupleLen());
@@ -223,9 +252,7 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     }
 
     size_t tupleLen() const override { return len_; }
-
     const std::vector<ColMeta> &cols() const override { return cols_; }
-
     Rid &rid() override { return _abstract_rid; }
     std::vector<AbstractExecutor*> get_children() override { return {left_.get(), right_.get()}; }
 };
