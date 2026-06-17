@@ -340,5 +340,8 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
 
 // 执行DML语句
 void QlManager::run_dml(std::unique_ptr<AbstractExecutor> exec){
-    exec->Next();
+    // 【核心修复】：必须使用循环驱动火山模型，确保多行 Update/Delete 被完全执行！
+    for (exec->beginTuple(); !exec->is_end(); exec->nextTuple()) {
+        exec->Next();
+    }
 }
