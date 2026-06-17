@@ -1,0 +1,9 @@
+test_smoke_db
+1
+t
+3
+t name 2 4 0 0
+t id 0 4 4 0
+t score 1 4 8 0
+0
+
