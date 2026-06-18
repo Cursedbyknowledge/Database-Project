@@ -377,18 +377,6 @@ colList:
     {
         $$.push_back($3);
     }
-    |   col AS colName
-    {
-        auto c = $1;
-        c->col_name = $3;   // override name with alias
-        $$ = std::vector<std::shared_ptr<Col>>{c};
-    }
-    |   colList ',' col AS colName
-    {
-        auto c = $3;
-        c->col_name = $5;
-        $$.push_back(c);
-    }
     ;
 
 op:

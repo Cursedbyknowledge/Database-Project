@@ -89,10 +89,9 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
                 query->group_by.push_back(tc.col_name);
             }
         }
-        // HAVING: 处理条件（聚合后的过滤）
+        // HAVING: 仅传递条件，不做列校验（HAVING 可能引用聚合别名）
         if (!x->having.empty()) {
             get_clause(x->having, query->having);
-            check_clause(query->tables, query->having);
         }
         // LIMIT
         query->limit_val = x->limit_val;
