@@ -49,6 +49,11 @@ class AbstractExecutor {
     // 返回子执行器(用于EXPLAIN收集行数)
     virtual std::vector<AbstractExecutor*> get_children() { return {}; }
 
+    // INLJ: 设置动态join key（由NestedLoopJoinExecutor调用，透传到IndexScanExecutor）
+    virtual void set_dynamic_join_key(const std::string& col_name, const char* key_data, int key_len, ColType key_type) {
+        (void)col_name; (void)key_data; (void)key_len; (void)key_type;
+    }
+
     std::vector<ColMeta>::const_iterator get_col(const std::vector<ColMeta> &rec_cols, const TabCol &target) {
         auto pos = std::find_if(rec_cols.begin(), rec_cols.end(), [&](const ColMeta &col) {
             return col.tab_name == target.tab_name && col.name == target.col_name;

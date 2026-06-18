@@ -251,6 +251,47 @@ std::shared_ptr<Plan> Planner::make_one_rel(std::shared_ptr<Query> query)
     {
         scantbl[i] = -1;
     }
+    // INLJ优化：为JOIN内表（右表）的连接列检测索引，有则升级为IndexScan
+    for (auto &jc : conds) {
+        if (jc.is_rhs_val) continue; // 跳过常量比较条件
+        if (jc.op != OP_EQ) continue; // INLJ只处理等值连接
+        // 检查右表连接列是否有索引
+        std::string rhs_tab = jc.rhs_col.tab_name;
+        for (size_t i = 0; i < tables.size(); i++) {
+            auto sp = std::dynamic_pointer_cast<ScanPlan>(table_scan_executors[i]);
+            if (sp && sp->tab_name_ == rhs_tab && sp->tag == T_SeqScan) {
+                std::vector<std::string> idx_cols = {jc.rhs_col.col_name};
+                TabMeta& tab = sm_manager_->db_.get_table(rhs_tab);
+                if (tab.is_index(idx_cols)) {
+                    // 升级为IndexScan
+                    auto new_sp = std::make_shared<ScanPlan>(
+                        T_IndexScan, sm_manager_, rhs_tab, sp->conds_, idx_cols);
+                    new_sp->fed_conds_ = sp->fed_conds_;
+                    table_scan_executors[i] = new_sp;
+                }
+                break;
+            }
+        }
+        // 同时检查左表（当右表列出现在lhs位置时）
+        std::string lhs_tab = jc.lhs_col.tab_name;
+        for (size_t i = 0; i < tables.size(); i++) {
+            auto sp = std::dynamic_pointer_cast<ScanPlan>(table_scan_executors[i]);
+            if (sp && sp->tab_name_ == lhs_tab && sp->tag == T_SeqScan) {
+                // 只有当该表不是第一个表(驱动表)时才考虑升级为IndexScan
+                if (i == 0) break;
+                std::vector<std::string> idx_cols = {jc.lhs_col.col_name};
+                TabMeta& tab = sm_manager_->db_.get_table(lhs_tab);
+                if (tab.is_index(idx_cols)) {
+                    auto new_sp = std::make_shared<ScanPlan>(
+                        T_IndexScan, sm_manager_, lhs_tab, sp->conds_, idx_cols);
+                    new_sp->fed_conds_ = sp->fed_conds_;
+                    table_scan_executors[i] = new_sp;
+                }
+                break;
+            }
+        }
+    }
+
     // 假设在ast中已经添加了jointree，这里需要修改的逻辑是，先处理jointree，然后再考虑剩下的部分
     if(conds.size() >= 1)
     {
@@ -318,25 +359,31 @@ std::shared_ptr<Plan> Planner::make_one_rel(std::shared_ptr<Query> query)
                                                                     std::move(right_need_to_join_executors), 
                                                                     std::move(merged_conds));
             } else if(left_need_to_join_executors != nullptr || right_need_to_join_executors != nullptr) {
+                // 确定新加入的表（作为右/内表）
+                std::shared_ptr<Plan> new_table_plan;
                 if(isneedreverse) {
+                    // 新表在rhs侧，条件方向正确（lhs=已连接表列, rhs=新表列）
+                    new_table_plan = std::move(right_need_to_join_executors);
+                } else {
+                    // 新表在lhs侧，需要交换条件方向使lhs指向已连接侧
                     std::map<CompOp, CompOp> swap_op = {
                         {OP_EQ, OP_EQ}, {OP_NE, OP_NE}, {OP_LT, OP_GT}, {OP_GT, OP_LT}, {OP_LE, OP_GE}, {OP_GE, OP_LE},
                     };
                     std::swap(it->lhs_col, it->rhs_col);
                     it->op = swap_op.at(it->op);
-                    left_need_to_join_executors = std::move(right_need_to_join_executors);
+                    new_table_plan = std::move(left_need_to_join_executors);
                 }
-                // 单表join：当前条件 + 仅合并与新表相关的已有cond
+                // 左深树：existing join result (left/outer) JOIN new table (right/inner)
                 std::vector<Condition> merged_conds{*it};
-                std::string new_tab = get_tab_name(left_need_to_join_executors);
+                std::string new_tab = get_tab_name(new_table_plan);
                 if (auto existing_jp = std::dynamic_pointer_cast<JoinPlan>(table_join_executors)) {
                     for (auto &ec : existing_jp->conds_) {
                         if (ec.lhs_col.tab_name == new_tab || ec.rhs_col.tab_name == new_tab)
                             merged_conds.push_back(ec);
                     }
                 }
-                table_join_executors = std::make_shared<JoinPlan>(T_NestLoop, std::move(left_need_to_join_executors), 
-                                                                    std::move(table_join_executors), std::move(merged_conds));
+                table_join_executors = std::make_shared<JoinPlan>(T_NestLoop, std::move(table_join_executors), 
+                                                                    std::move(new_table_plan), std::move(merged_conds));
             } else {
                 push_conds(std::move(&(*it)), table_join_executors);
             }
@@ -407,9 +454,14 @@ static std::shared_ptr<Plan> pushdown_projection_impl(
     const std::vector<Condition>& all_conds) {
     
     if (auto jp = std::dynamic_pointer_cast<JoinPlan>(plan)) {
+        // 将JoinPlan自身的连接条件加入all_conds，确保join key列不会被子投影裁剪
+        auto extended_conds = all_conds;
+        for (auto &jc : jp->conds_) {
+            extended_conds.push_back(jc);
+        }
         // 递归处理子树
-        jp->left_ = pushdown_projection_impl(jp->left_, sel_cols, all_conds);
-        jp->right_ = pushdown_projection_impl(jp->right_, sel_cols, all_conds);
+        jp->left_ = pushdown_projection_impl(jp->left_, sel_cols, extended_conds);
+        jp->right_ = pushdown_projection_impl(jp->right_, sel_cols, extended_conds);
         return plan;
     }
     if (auto sp = std::dynamic_pointer_cast<ScanPlan>(plan)) {
@@ -430,8 +482,8 @@ static std::shared_ptr<Plan> pushdown_projection_impl(
                     needed_names.insert(cond.rhs_col.col_name);
             }
         }
-        // 如果不需要精简（SELECT * 或无相关条件），跳过
-        if (needed_names.empty() || needed_names.size() >= tab_cols.size()) {
+        // 如果无相关条件，跳过
+        if (needed_names.empty()) {
             return plan;
         }
         // 构建Project的sel_cols（保持原始列顺序）
@@ -441,7 +493,6 @@ static std::shared_ptr<Plan> pushdown_projection_impl(
                 proj_cols.push_back({.tab_name = sp->tab_name_, .col_name = col_meta.name});
             }
         }
-        if (proj_cols.size() >= tab_cols.size()) return plan;
         // 插入Project节点
         return std::make_shared<ProjectionPlan>(T_Projection, std::move(plan), std::move(proj_cols));
     }
@@ -591,7 +642,12 @@ std::shared_ptr<Plan> Planner::generate_select_plan(std::shared_ptr<Query> query
     auto original_conds = query->conds;
     bool is_star = query->cols_star_;
     if (!is_star) {
-        plannerRoot = pushdown_projection_impl(plannerRoot, sel_cols, original_conds);
+        // 投影下推仅对JOIN树有效（为每个Scan插入Project节点裁剪列）
+        auto effective = plannerRoot;
+        if (auto sp = std::dynamic_pointer_cast<SortPlan>(effective)) effective = sp->subplan_;
+        if (std::dynamic_pointer_cast<JoinPlan>(effective)) {
+            plannerRoot = pushdown_projection_impl(plannerRoot, sel_cols, original_conds);
+        }
     }
     plannerRoot = std::make_shared<ProjectionPlan>(T_Projection, std::move(plannerRoot), 
                                                         std::move(sel_cols), is_star);

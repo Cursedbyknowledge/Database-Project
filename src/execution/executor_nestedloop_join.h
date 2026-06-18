@@ -28,6 +28,13 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     std::unique_ptr<RmRecord> left_rec_;
     std::unique_ptr<RmRecord> right_rec_;
 
+    // INLJ相关：join key列信息
+    bool has_join_key_info_ = false;
+    int join_left_offset_ = 0;       // 左表key列在left_rec_中的offset
+    int join_left_len_ = 0;          // 左表key列长度
+    ColType join_left_type_ = TYPE_INT;  // 左表key列类型
+    std::string join_right_col_name_;    // 右表key列名（用于注入）
+
     bool eval_join_cond(const Condition &cond) {
         const char *lhs_ptr = nullptr;
         const char *rhs_ptr = nullptr;
@@ -163,8 +170,15 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         return true;
     }
 
+    // INLJ辅助：将当前左表行的join key注入右表
+    void inject_join_key_to_right() {
+        if (has_join_key_info_ && left_rec_ != nullptr) {
+            right_->set_dynamic_join_key(join_right_col_name_, 
+                left_rec_->data + join_left_offset_, join_left_len_, join_left_type_);
+        }
+    }
+
     void advance_to_match() {
-        int safety = 0;
         while (!left_->is_end()) {
             if (left_rec_ != nullptr) {
                 while (!right_->is_end()) {
@@ -173,7 +187,6 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
                         return;
                     }
                     right_->nextTuple();
-                    if (++safety > 100000) { isend = true; return; }
                 }
             }
             // 右表耗尽，推进左表并重置右表
@@ -185,9 +198,9 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
                 left_->nextTuple();
             }
             if (left_rec_ != nullptr) {
+                inject_join_key_to_right();
                 right_->beginTuple();
             }
-            if (++safety > 100000) { isend = true; return; }
         }
         isend = true;
     }
@@ -207,6 +220,64 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         cols_.insert(cols_.end(), right_cols.begin(), right_cols.end());
         isend = false;
         fed_conds_ = std::move(conds);
+
+        // INLJ初始化：从连接条件中提取第一个等值条件的key信息
+        auto &left_cols = left_->cols();
+        auto &r_cols = right_->cols();
+        for (auto &cond : fed_conds_) {
+            if (cond.is_rhs_val || cond.op != OP_EQ) continue;
+            // 尝试 lhs=左表, rhs=右表
+            bool found_left = false, found_right = false;
+            int l_off = 0, l_len = 0;
+            ColType l_type = TYPE_INT;
+            std::string r_col_name;
+            for (auto &lc : left_cols) {
+                if ((cond.lhs_col.tab_name.empty() || lc.tab_name == cond.lhs_col.tab_name) 
+                    && lc.name == cond.lhs_col.col_name) {
+                    l_off = lc.offset; l_len = lc.len; l_type = lc.type;
+                    found_left = true; break;
+                }
+            }
+            for (auto &rc : r_cols) {
+                if ((cond.rhs_col.tab_name.empty() || rc.tab_name == cond.rhs_col.tab_name) 
+                    && rc.name == cond.rhs_col.col_name) {
+                    r_col_name = rc.name;
+                    found_right = true; break;
+                }
+            }
+            if (found_left && found_right) {
+                has_join_key_info_ = true;
+                join_left_offset_ = l_off;
+                join_left_len_ = l_len;
+                join_left_type_ = l_type;
+                join_right_col_name_ = r_col_name;
+                break;
+            }
+            // 尝试反向: lhs=右表, rhs=左表
+            found_left = false; found_right = false;
+            for (auto &lc : left_cols) {
+                if ((cond.rhs_col.tab_name.empty() || lc.tab_name == cond.rhs_col.tab_name) 
+                    && lc.name == cond.rhs_col.col_name) {
+                    l_off = lc.offset; l_len = lc.len; l_type = lc.type;
+                    found_left = true; break;
+                }
+            }
+            for (auto &rc : r_cols) {
+                if ((cond.lhs_col.tab_name.empty() || rc.tab_name == cond.lhs_col.tab_name) 
+                    && rc.name == cond.lhs_col.col_name) {
+                    r_col_name = rc.name;
+                    found_right = true; break;
+                }
+            }
+            if (found_left && found_right) {
+                has_join_key_info_ = true;
+                join_left_offset_ = l_off;
+                join_left_len_ = l_len;
+                join_left_type_ = l_type;
+                join_right_col_name_ = r_col_name;
+                break;
+            }
+        }
     }
 
     void beginTuple() override {
@@ -219,6 +290,7 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         }
         if (left_->is_end()) { isend = true; return; }
 
+        inject_join_key_to_right();
         right_->beginTuple();
         advance_to_match();
     }

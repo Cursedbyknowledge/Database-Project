@@ -290,13 +290,10 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
         if (pp->is_star_ || pp->sel_cols_.empty() || (pp->sel_cols_.size() == 1 && pp->sel_cols_[0].col_name == "*")) {
             out += "*";
         } else {
-            auto cols = pp->sel_cols_;
-            std::sort(cols.begin(), cols.end(), [](auto &a, auto &b) {
-                return (a.tab_name + "." + a.col_name) < (b.tab_name + "." + b.col_name);
-            });
-            for (size_t i = 0; i < cols.size(); i++) {
+            // 保持原始列顺序，不做排序
+            for (size_t i = 0; i < pp->sel_cols_.size(); i++) {
                 if (i) out += ", ";
-                out += alias_for(cols[i].tab_name) + "." + cols[i].col_name;
+                out += alias_for(pp->sel_cols_[i].tab_name) + "." + pp->sel_cols_[i].col_name;
             }
         }
         out += "], rows=" + std::to_string(rows) + ")\n";
@@ -322,8 +319,7 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
     int safety = 0;
     for (executorTreeRoot->beginTuple(); !executorTreeRoot->is_end(); executorTreeRoot->nextTuple()) {
         executorTreeRoot->Next();
-        if (++safety > 100000) {
-            std::cerr << "WARNING: explain_select loop exceeded 100000, breaking" << std::endl;
+        if (++safety > 10000000) {
             break;
         }
     }

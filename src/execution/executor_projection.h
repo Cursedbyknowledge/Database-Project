@@ -74,4 +74,9 @@ class ProjectionExecutor : public AbstractExecutor {
 
     Rid &rid() override { return _abstract_rid; }
     std::vector<AbstractExecutor*> get_children() override { return {prev_.get()}; }
+
+    // INLJ: 透传动态join key到子节点
+    void set_dynamic_join_key(const std::string& col_name, const char* key_data, int key_len, ColType key_type) override {
+        prev_->set_dynamic_join_key(col_name, key_data, key_len, key_type);
+    }
 };
