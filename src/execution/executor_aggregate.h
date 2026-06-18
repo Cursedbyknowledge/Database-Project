@@ -119,6 +119,7 @@ public:
     AggExecutor(std::unique_ptr<AbstractExecutor> prev,
                 const std::vector<std::string>& funcs,
                 const std::vector<size_t>& input_idxs,
+                const std::vector<bool>& is_star_flags,
                 const std::vector<ColMeta>& output_cols,
                 const std::vector<size_t>& group_idxs)
         : prev_(std::move(prev)), group_idxs_(group_idxs)
@@ -129,7 +130,6 @@ public:
         // 构建聚合描述
         for (size_t i = 0; i < funcs.size(); i++) {
             AggFunc af;
-            af.is_star = (input_idxs[i] == (size_t)-1 || (funcs[i] == "COUNT" && i < input_idxs.size()));
             if (funcs[i] == "COUNT") af.type = AggFunc::COUNT;
             else if (funcs[i] == "SUM") af.type = AggFunc::SUM;
             else if (funcs[i] == "MAX") af.type = AggFunc::MAX;
@@ -137,9 +137,7 @@ public:
             else if (funcs[i] == "AVG") af.type = AggFunc::AVG;
             else af.type = AggFunc::COUNT;
             af.input_idx = input_idxs[i];
-            af.is_star = (i < input_idxs.size() && funcs[i] == "COUNT" 
-                         && i < output_cols.size() && output_cols[group_idxs.size()+i].name == "*");
-            // 从ast判断：若col_name被AS重命名了，但原始func是COUNT且原列是*
+            af.is_star = (i < is_star_flags.size()) ? is_star_flags[i] : false;
             agg_funcs_.push_back(af);
         }
         collect();

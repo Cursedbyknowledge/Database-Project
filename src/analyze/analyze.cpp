@@ -56,7 +56,7 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
                 query->agg_funcs.push_back(sv_sel_col->agg_func);
                 query->agg_col_names.push_back(sv_sel_col->col_name);
                 query->agg_input_idxs.push_back(0);  // 稍后由planner填充
-                query->agg_is_star.push_back(sv_sel_col->col_name == "*");
+                query->agg_is_star.push_back(sv_sel_col->col_name == "*" || sv_sel_col->tab_name == "*");
                 // 聚合列不需要check_column（列名可能是别名）
             } else {
                 query->cols.push_back(sel_col);

@@ -144,6 +144,7 @@ class AggPlan : public Plan
         AggPlan(std::shared_ptr<Plan> subplan,
                 std::vector<std::string> agg_funcs,
                 std::vector<size_t> agg_input_idxs,
+                std::vector<bool> agg_is_star,
                 std::vector<ColMeta> output_cols,
                 std::vector<size_t> group_idxs,
                 std::vector<std::string> group_col_names)
@@ -152,6 +153,7 @@ class AggPlan : public Plan
             subplan_ = std::move(subplan);
             agg_funcs_ = std::move(agg_funcs);
             agg_input_idxs_ = std::move(agg_input_idxs);
+            agg_is_star_ = std::move(agg_is_star);
             output_cols_ = std::move(output_cols);
             group_idxs_ = std::move(group_idxs);
             group_col_names_ = std::move(group_col_names);
@@ -160,6 +162,7 @@ class AggPlan : public Plan
         std::shared_ptr<Plan> subplan_;
         std::vector<std::string> agg_funcs_;
         std::vector<size_t> agg_input_idxs_;
+        std::vector<bool> agg_is_star_;
         std::vector<ColMeta> output_cols_;
         std::vector<size_t> group_idxs_;
         std::vector<std::string> group_col_names_;

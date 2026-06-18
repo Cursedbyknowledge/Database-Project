@@ -511,8 +511,8 @@ std::shared_ptr<Plan> Planner::generate_select_plan(std::shared_ptr<Query> query
         }
         // 插入AggPlan
         plannerRoot = std::make_shared<AggPlan>(std::move(plannerRoot), query->agg_funcs,
-                                                 query->agg_input_idxs, out_cols,
-                                                 group_idxs, query->group_by);
+                                                 query->agg_input_idxs, query->agg_is_star,
+                                                 out_cols, group_idxs, query->group_by);
         // 顶层Projection
         std::vector<TabCol> proj_cols;
         for (auto &cm : out_cols) {

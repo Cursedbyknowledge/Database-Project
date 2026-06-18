@@ -183,7 +183,7 @@ class Portal
         } else if(auto x = std::dynamic_pointer_cast<AggPlan>(plan)) {
             auto sub = convert_plan_executor(x->subplan_, context);
             return std::make_unique<AggExecutor>(std::move(sub), x->agg_funcs_, x->agg_input_idxs_,
-                                                  x->output_cols_, x->group_idxs_);
+                                                  x->agg_is_star_, x->output_cols_, x->group_idxs_);
         }
         return nullptr;
     }
