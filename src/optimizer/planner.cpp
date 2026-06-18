@@ -377,10 +377,15 @@ std::shared_ptr<Plan> Planner::generate_sort_plan(std::shared_ptr<Query> query, 
         all_cols.insert(all_cols.end(), sel_tab_cols.begin(), sel_tab_cols.end());
     }
     TabCol sel_col;
+    bool found_gs = false;
     for (auto &col : all_cols) {
-        if(col.name.compare(x->order->cols->col_name) == 0 )
-        sel_col = {.tab_name = col.tab_name, .col_name = col.name};
+        if(col.name.compare(x->order->cols->col_name) == 0 ) {
+            sel_col = {.tab_name = col.tab_name, .col_name = col.name};
+            found_gs = true;
+            break;
+        }
     }
+    if (!found_gs) return plan;
     return std::make_shared<SortPlan>(T_Sort, std::move(plan), sel_col, 
                                     x->order->orderby_dir == ast::OrderBy_DESC);
 }
@@ -507,8 +512,8 @@ std::shared_ptr<Plan> Planner::generate_select_plan(std::shared_ptr<Query> query
                 if (c->agg_func == "COUNT") {
                     cm.type = TYPE_INT; cm.len = sizeof(int);
                 } else if (input_col != "*" && input_idx < scan_cols.size()) {
-                    cm.type = scan_cols[input_idx].type;
-                    cm.len = scan_cols[input_idx].len;
+                    cm.type = (c->agg_func == "AVG") ? TYPE_FLOAT : scan_cols[input_idx].type;
+                    cm.len = (c->agg_func == "AVG") ? (int)sizeof(float) : scan_cols[input_idx].len;
                 } else {
                     cm.type = TYPE_FLOAT; cm.len = sizeof(float);
                 }
@@ -519,7 +524,8 @@ std::shared_ptr<Plan> Planner::generate_select_plan(std::shared_ptr<Query> query
         // 插入AggPlan
         plannerRoot = std::make_shared<AggPlan>(std::move(plannerRoot), query->agg_funcs,
                                                  query->agg_input_idxs, query->agg_is_star,
-                                                 out_cols, group_idxs, query->group_by);
+                                                 out_cols, group_idxs, query->group_by,
+                                                 query->having);
         // 顶层Projection
         std::vector<TabCol> proj_cols;
         for (auto &cm : out_cols) {
@@ -527,6 +533,23 @@ std::shared_ptr<Plan> Planner::generate_select_plan(std::shared_ptr<Query> query
         }
         plannerRoot = std::make_shared<ProjectionPlan>(T_Projection, std::move(plannerRoot),
                                                         std::move(proj_cols), false);
+        // Reapply ORDER BY after aggregation
+        if (sel_stmt && sel_stmt->has_sort) {
+            TabCol sort_col;
+            bool found_sort = false;
+            for (auto& oc : out_cols) {
+                if (oc.name == sel_stmt->order->cols->col_name) {
+                    sort_col = {.tab_name = "", .col_name = oc.name};
+                    found_sort = true;
+                    break;
+                }
+            }
+            if (found_sort) {
+                plannerRoot = std::make_shared<SortPlan>(T_Sort, std::move(plannerRoot),
+                                                          sort_col,
+                                                          sel_stmt->order->orderby_dir == ast::OrderBy_DESC);
+            }
+        }
         return plannerRoot;
     }
 

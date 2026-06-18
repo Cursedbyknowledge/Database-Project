@@ -147,7 +147,8 @@ class AggPlan : public Plan
                 std::vector<bool> agg_is_star,
                 std::vector<ColMeta> output_cols,
                 std::vector<size_t> group_idxs,
-                std::vector<std::string> group_col_names)
+                std::vector<std::string> group_col_names,
+                 std::vector<Condition> having = {})
         {
             Plan::tag = T_Aggregate;
             subplan_ = std::move(subplan);
@@ -157,6 +158,7 @@ class AggPlan : public Plan
             output_cols_ = std::move(output_cols);
             group_idxs_ = std::move(group_idxs);
             group_col_names_ = std::move(group_col_names);
+             having_ = std::move(having);
         }
         ~AggPlan(){}
         std::shared_ptr<Plan> subplan_;
@@ -166,6 +168,7 @@ class AggPlan : public Plan
         std::vector<ColMeta> output_cols_;
         std::vector<size_t> group_idxs_;
         std::vector<std::string> group_col_names_;
+         std::vector<Condition> having_;
 };
 
 // dml语句，包括insert; delete; update; select语句　
