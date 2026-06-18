@@ -198,6 +198,7 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
                          const std::map<std::string, std::string>& alias_map) {
     int rows = rows_map.count(p.get()) ? rows_map.at(p.get()) : 0;
     int out_rows = out_rows_map.count(p.get()) ? out_rows_map.at(p.get()) : rows;
+    if (out_rows == 0 && rows > 0) out_rows = rows;  // 防御：runtime_output_=0时退化为rows
     // 别名查找：若有别名则用别名，否则用原表名
     auto alias_for = [&](const std::string& real) -> std::string {
         auto it = alias_map.find(real);
