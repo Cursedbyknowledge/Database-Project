@@ -43,7 +43,8 @@ typedef enum PlanTag{
     T_NestLoop,
     T_SortMerge,    // sort merge join
     T_Sort,
-    T_Projection
+    T_Projection,
+    T_Aggregate
 } PlanTag;
 
 // 查询执行计划
@@ -133,6 +134,35 @@ class SortPlan : public Plan
         TabCol sel_col_;
         bool is_desc_;
         
+};
+
+
+// 聚合计划
+class AggPlan : public Plan
+{
+    public:
+        AggPlan(std::shared_ptr<Plan> subplan,
+                std::vector<std::string> agg_funcs,
+                std::vector<size_t> agg_input_idxs,
+                std::vector<ColMeta> output_cols,
+                std::vector<size_t> group_idxs,
+                std::vector<std::string> group_col_names)
+        {
+            Plan::tag = T_Aggregate;
+            subplan_ = std::move(subplan);
+            agg_funcs_ = std::move(agg_funcs);
+            agg_input_idxs_ = std::move(agg_input_idxs);
+            output_cols_ = std::move(output_cols);
+            group_idxs_ = std::move(group_idxs);
+            group_col_names_ = std::move(group_col_names);
+        }
+        ~AggPlan(){}
+        std::shared_ptr<Plan> subplan_;
+        std::vector<std::string> agg_funcs_;
+        std::vector<size_t> agg_input_idxs_;
+        std::vector<ColMeta> output_cols_;
+        std::vector<size_t> group_idxs_;
+        std::vector<std::string> group_col_names_;
 };
 
 // dml语句，包括insert; delete; update; select语句　

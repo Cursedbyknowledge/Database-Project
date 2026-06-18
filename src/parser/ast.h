@@ -244,6 +244,10 @@ struct SelectStmt : public TreeNode {
     bool explain_analyze = false;
     int limit_val = -1;
 
+    // 聚合相关
+    std::vector<std::string> group_by;               // GROUP BY 列名
+    std::vector<std::shared_ptr<BinaryExpr>> having; // HAVING 条件
+
     SelectStmt(std::vector<std::shared_ptr<Col>> cols_,
                std::vector<std::string> tabs_,
                std::vector<std::shared_ptr<BinaryExpr>> conds_,

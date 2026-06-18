@@ -448,11 +448,64 @@ std::shared_ptr<Plan> Planner::generate_select_plan(std::shared_ptr<Query> query
     //逻辑优化
     query = logical_optimization(std::move(query), context);
 
-    //物理优化
-    auto sel_cols = query->cols;
-    auto original_conds = query->conds;  // 保存原始条件（投影下推需要join key）
     std::shared_ptr<Plan> plannerRoot = physical_optimization(query, context);
-    // 投影下推：在Join下方为每表插入Project节点
+
+    // 聚合查询特殊处理
+    if (query->has_agg) {
+        auto scan = std::dynamic_pointer_cast<ScanPlan>(plannerRoot);
+        std::vector<ColMeta> out_cols;
+        std::vector<ColMeta> empty_cols;
+        auto &scan_cols = (scan) ? scan->cols_ : empty_cols;
+        // 从SELECT列表获取agg列名（通过ast Col节点）
+        auto sel_stmt = std::dynamic_pointer_cast<ast::SelectStmt>(query->parse);
+        int agg_idx = 0;
+        if (sel_stmt) {
+            for (auto &c : sel_stmt->cols) {
+                if (!c->is_agg) continue;
+                // 查找输入列在scan cols中的索引
+                std::string input_col = c->tab_name.empty() ? c->col_name : c->tab_name;
+                size_t input_idx = 0;
+                if (input_col != "*") {
+                    for (size_t j = 0; j < scan_cols.size(); j++) {
+                        if (scan_cols[j].name == input_col) {
+                            input_idx = j;
+                            break;
+                        }
+                    }
+                }
+                query->agg_input_idxs[agg_idx] = input_idx;
+                // 构建输出列元数据
+                ColMeta cm;
+                cm.tab_name = "";
+                cm.name = c->col_name;  // AS别名或原始列名
+                if (c->agg_func == "COUNT") {
+                    cm.type = TYPE_INT; cm.len = sizeof(int);
+                } else if (input_col != "*" && input_idx < scan_cols.size()) {
+                    cm.type = scan_cols[input_idx].type;
+                    cm.len = scan_cols[input_idx].len;
+                } else {
+                    cm.type = TYPE_FLOAT; cm.len = sizeof(float);
+                }
+                out_cols.push_back(cm);
+                agg_idx++;
+            }
+        }
+        // 插入AggPlan
+        plannerRoot = std::make_shared<AggPlan>(std::move(plannerRoot), query->agg_funcs,
+                                                 query->agg_input_idxs, out_cols,
+                                                 std::vector<size_t>(), query->group_by);
+        // 顶层Projection: 用agg输出列名作为投影列
+        std::vector<TabCol> proj_cols;
+        for (auto &cm : out_cols) {
+            proj_cols.push_back({.tab_name = "", .col_name = cm.name});
+        }
+        plannerRoot = std::make_shared<ProjectionPlan>(T_Projection, std::move(plannerRoot),
+                                                        std::move(proj_cols), false);
+        return plannerRoot;
+    }
+
+    auto sel_cols = query->cols;
+    auto original_conds = query->conds;
     bool is_star = query->cols_star_;
     if (!is_star) {
         plannerRoot = pushdown_projection_impl(plannerRoot, sel_cols, original_conds);

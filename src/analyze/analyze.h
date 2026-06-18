@@ -39,6 +39,15 @@ class Query{
     std::vector<Value> values;
     // 反向别名映射: real_table_name -> alias_name (用于EXPLAIN输出)
     std::map<std::string, std::string> rev_alias_map_;
+    // 聚合相关
+    bool has_agg = false;
+    std::vector<std::string> agg_funcs;      // "COUNT"/"SUM"/"MAX"/"MIN"/"AVG"/"STAR"
+    std::vector<std::string> agg_col_names;  // 聚合输入列名（COUNT(*)为"*"）
+    std::vector<size_t> agg_input_idxs;      // 聚合列在 prev cols 中的索引（planner填充）
+    std::vector<bool> agg_is_star;           // COUNT(*)标记
+    std::vector<std::string> group_by;
+    std::vector<Condition> having;
+    int limit_val = -1;
 
     Query(){}
 

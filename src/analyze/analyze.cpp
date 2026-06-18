@@ -48,14 +48,25 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
         }
 
         // 处理target list，再target list中添加上表名，例如 a.id
+        bool has_agg = false;
         for (auto &sv_sel_col : x->cols) {
             TabCol sel_col = {.tab_name = sv_sel_col->tab_name, .col_name = sv_sel_col->col_name};
-            query->cols.push_back(sel_col);
+            if (sv_sel_col->is_agg) {
+                has_agg = true;
+                query->agg_funcs.push_back(sv_sel_col->agg_func);
+                query->agg_col_names.push_back(sv_sel_col->col_name);
+                query->agg_input_idxs.push_back(0);  // 稍后由planner填充
+                query->agg_is_star.push_back(sv_sel_col->col_name == "*");
+                // 聚合列不需要check_column（列名可能是别名）
+            } else {
+                query->cols.push_back(sel_col);
+            }
         }
+        query->has_agg = has_agg;
         
         std::vector<ColMeta> all_cols;
         get_all_cols(query->tables, all_cols);
-        if (query->cols.empty()) {
+        if (query->cols.empty() && !has_agg) {
             // select all columns
             query->cols_star_ = true;
             for (auto &col : all_cols) {
@@ -63,7 +74,7 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
                 query->cols.push_back(sel_col);
             }
         } else {
-            // infer table name from column name
+            // infer table name from column name (skip agg cols)
             for (auto &sel_col : query->cols) {
                 sel_col = check_column(all_cols, sel_col);  // 列元数据校验
             }

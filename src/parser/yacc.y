@@ -50,7 +50,7 @@ CHECKPOINT STATIC_CHECKPOINT
 %type <sv_val> value
 %type <sv_vals> valueList
 %type <sv_str> tbName colName
-%type <sv_strs> tableList colNameList
+%type <sv_strs> tableList colNameList opt_group_clause
 %type <sv_col> col
 %type <sv_cols> colList selector agg_selector
 %type <sv_set_clause> setClause
@@ -197,6 +197,8 @@ dml:
         merged_conds.insert(merged_conds.end(), g_join_on_conds.begin(), g_join_on_conds.end());
         g_join_on_conds.clear();
         auto sel = std::make_shared<SelectStmt>($2, $4, merged_conds, $8);
+        sel->group_by = $6;   // GROUP BY columns
+        sel->having = $7;     // HAVING conditions
         if ($9 > 0) sel->limit_val = $9;
         sel->alias_map = g_alias_map_; g_alias_map_.clear();
         $$ = sel;
@@ -224,8 +226,8 @@ dml:
     ;
 
 opt_group_clause:
-        /* epsilon */ { }
-    |   GROUP BY colNameList { }
+        /* epsilon */ { $$ = std::vector<std::string>(); }
+    |   GROUP BY colNameList { $$ = $3; }
     ;
 
 optHavingClause:
@@ -375,6 +377,18 @@ colList:
     {
         $$.push_back($3);
     }
+    |   col AS colName
+    {
+        auto c = $1;
+        c->col_name = $3;   // override name with alias
+        $$ = std::vector<std::shared_ptr<Col>>{c};
+    }
+    |   colList ',' col AS colName
+    {
+        auto c = $3;
+        c->col_name = $5;
+        $$.push_back(c);
+    }
     ;
 
 op:
@@ -499,6 +513,15 @@ agg_item:
         c->is_agg = true;
         c->agg_func = "AVG";
         $$ = std::vector<std::shared_ptr<Col>>{c};
+    }
+    |   agg_item AS colName
+    {
+        auto v = $1;
+        for (auto &c : v) {
+            if (c->tab_name.empty()) c->tab_name = c->col_name;  // 保存原始输入列名
+            c->col_name = $3;  // AS别名设为输出列名
+        }
+        $$ = v;
     }
     ;
 
