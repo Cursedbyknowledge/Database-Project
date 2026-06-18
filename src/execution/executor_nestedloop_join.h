@@ -163,35 +163,28 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         return true;
     }
 
-    // 极简的迭代状态机
     void advance_to_match() {
         int safety = 0;
         while (!left_->is_end()) {
             if (left_rec_ != nullptr) {
                 while (!right_->is_end()) {
                     right_rec_ = right_->Next();
-                    if (right_rec_ == nullptr) {
-                        right_->nextTuple();
-                        if (++safety > 100000) { isend = true; return; }
-                        continue;
-                    }
-                    if (eval_conds()) {
+                    if (right_rec_ != nullptr && eval_conds()) {
                         return;
                     }
                     right_->nextTuple();
                     if (++safety > 100000) { isend = true; return; }
                 }
             }
-            
             left_->nextTuple();
+            left_rec_ = nullptr;
             while (!left_->is_end()) {
                 left_rec_ = left_->Next();
                 if (left_rec_ != nullptr) break;
                 left_->nextTuple();
                 if (++safety > 100000) { isend = true; return; }
             }
-            
-            if (!left_->is_end()) {
+            if (left_rec_ != nullptr) {
                 right_->beginTuple();
             }
             if (++safety > 100000) { isend = true; return; }
