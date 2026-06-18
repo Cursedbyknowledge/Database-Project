@@ -15,6 +15,7 @@ See the Mulan PSL v2 for more details. */
 #include <signal.h>
 #include <unistd.h>
 #include <atomic>
+#include <fstream>
 
 #include "errors.h"
 #include "optimizer/optimizer.h"
@@ -167,6 +168,16 @@ void *client_handler(void *sock_fd) {
                     outfile.close();
                 }
             }
+        } else {
+            // yyparse returned non-zero: syntax error - write failure
+            std::string err_msg = "syntax error\n";
+            memcpy(data_send, err_msg.c_str(), err_msg.length());
+            data_send[err_msg.length()] = '\0';
+            offset = err_msg.length();
+            std::fstream outfile;
+            outfile.open("output.txt", std::ios::out | std::ios::app);
+            outfile << "failure\n";
+            outfile.close();
         }
         if(finish_analyze == false) {
             yy_delete_buffer(buf);
