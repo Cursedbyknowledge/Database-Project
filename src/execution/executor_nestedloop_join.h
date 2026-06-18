@@ -186,10 +186,6 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
             }
             if (left_rec_ != nullptr) {
                 right_->beginTuple();
-                // 强制定位：SeqScan beginTuple后可能is_end残留
-                while (!right_->is_end() && right_->Next() == nullptr) {
-                    right_->nextTuple();
-                }
             }
         }
         isend = true;
@@ -223,10 +219,6 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
         if (left_->is_end()) { isend = true; return; }
 
         right_->beginTuple();
-        // 强制定位：防止 beginTuple 后 is_end() 残留为 true
-        while (!right_->is_end() && right_->Next() == nullptr) {
-            right_->nextTuple();
-        }
         advance_to_match();
     }
 
