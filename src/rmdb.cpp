@@ -166,7 +166,19 @@ void *client_handler(void *sock_fd) {
                     outfile << "failure\n";
                     outfile.close();
                 }
+            } else {
+                // parse_tree is null after error recovery
+                std::fstream outfile;
+                outfile.open("output.txt", std::ios::out | std::ios::app);
+                outfile << "failure\n";
+                outfile.close();
             }
+        } else {
+            // yyparse returned non-zero: syntax error
+            std::fstream outfile;
+            outfile.open("output.txt", std::ios::out | std::ios::app);
+            outfile << "failure\n";
+            outfile.close();
         }
         if(finish_analyze == false) {
             yy_delete_buffer(buf);
