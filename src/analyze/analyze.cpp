@@ -82,6 +82,20 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
         //处理where条件
         get_clause(x->conds, query->conds);
         check_clause(query->tables, query->conds);
+        // GROUP BY: 校验列存在性并推断表名
+        if (!x->group_by.empty()) {
+            for (auto &gb_col : x->group_by) {
+                TabCol tc = check_column(all_cols, {.tab_name = "", .col_name = gb_col});
+                query->group_by.push_back(tc.col_name);
+            }
+        }
+        // HAVING: 处理条件（聚合后的过滤）
+        if (!x->having.empty()) {
+            get_clause(x->having, query->having);
+            check_clause(query->tables, query->having);
+        }
+        // LIMIT
+        query->limit_val = x->limit_val;
     } else if (auto x = std::dynamic_pointer_cast<ast::UpdateStmt>(parse)) {
         // 检查表是否存在
         if (!sm_manager_->db_.is_table(x->tab_name)) {

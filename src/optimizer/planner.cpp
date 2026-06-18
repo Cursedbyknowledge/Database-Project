@@ -456,28 +456,47 @@ std::shared_ptr<Plan> Planner::generate_select_plan(std::shared_ptr<Query> query
         std::vector<ColMeta> out_cols;
         std::vector<ColMeta> empty_cols;
         auto &scan_cols = (scan) ? scan->cols_ : empty_cols;
-        // 从SELECT列表获取agg列名（通过ast Col节点）
+
+        // 计算 GROUP BY 列索引
+        std::vector<size_t> group_idxs;
+        for (auto &gb_name : query->group_by) {
+            for (size_t j = 0; j < scan_cols.size(); j++) {
+                if (scan_cols[j].name == gb_name) {
+                    group_idxs.push_back(j);
+                    break;
+                }
+            }
+        }
+
+        // 构建输出列元数据：先 GROUP BY 列，再聚合列
+        // GROUP BY 列加入输出
+        for (auto &gb_name : query->group_by) {
+            for (auto &sc : scan_cols) {
+                if (sc.name == gb_name) {
+                    ColMeta cm = sc;
+                    cm.tab_name = "";
+                    out_cols.push_back(cm);
+                    break;
+                }
+            }
+        }
+        // 聚合列加入输出
         auto sel_stmt = std::dynamic_pointer_cast<ast::SelectStmt>(query->parse);
         int agg_idx = 0;
         if (sel_stmt) {
             for (auto &c : sel_stmt->cols) {
                 if (!c->is_agg) continue;
-                // 查找输入列在scan cols中的索引
                 std::string input_col = c->tab_name.empty() ? c->col_name : c->tab_name;
                 size_t input_idx = 0;
                 if (input_col != "*") {
                     for (size_t j = 0; j < scan_cols.size(); j++) {
-                        if (scan_cols[j].name == input_col) {
-                            input_idx = j;
-                            break;
-                        }
+                        if (scan_cols[j].name == input_col) { input_idx = j; break; }
                     }
                 }
                 query->agg_input_idxs[agg_idx] = input_idx;
-                // 构建输出列元数据
                 ColMeta cm;
                 cm.tab_name = "";
-                cm.name = c->col_name;  // AS别名或原始列名
+                cm.name = c->col_name;
                 if (c->agg_func == "COUNT") {
                     cm.type = TYPE_INT; cm.len = sizeof(int);
                 } else if (input_col != "*" && input_idx < scan_cols.size()) {
@@ -493,8 +512,8 @@ std::shared_ptr<Plan> Planner::generate_select_plan(std::shared_ptr<Query> query
         // 插入AggPlan
         plannerRoot = std::make_shared<AggPlan>(std::move(plannerRoot), query->agg_funcs,
                                                  query->agg_input_idxs, out_cols,
-                                                 std::vector<size_t>(), query->group_by);
-        // 顶层Projection: 用agg输出列名作为投影列
+                                                 group_idxs, query->group_by);
+        // 顶层Projection
         std::vector<TabCol> proj_cols;
         for (auto &cm : out_cols) {
             proj_cols.push_back({.tab_name = "", .col_name = cm.name});
@@ -594,8 +613,9 @@ std::shared_ptr<Plan> Planner::do_planner(std::shared_ptr<Query> query, Context 
         std::shared_ptr<Plan> projection = generate_select_plan(std::move(query), context);
         auto dml = std::make_shared<DMLPlan>(T_select, projection, std::string(), std::vector<Value>(),
                                                     std::vector<Condition>(), std::vector<SetClause>());
-        // EXPLAIN标记通过Context传递，避免修改Plan基类布局
+        // EXPLAIN标记和LIMIT通过Context传递
         context->explain_ = x->explain_analyze;
+        context->limit_val_ = x->limit_val;
         plannerRoot = dml;
     } else {
         throw InternalError("Unexpected AST root");

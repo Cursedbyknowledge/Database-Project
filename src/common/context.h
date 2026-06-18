@@ -40,6 +40,7 @@ public:
     int *offset_;
     bool ellipsis_;
     bool explain_;
+    int limit_val_ = -1;  // LIMIT N（-1 表示不限制）
     // 反向别名映射 (real_table_name -> alias_name)，供EXPLAIN输出使用
     std::map<std::string, std::string> rev_alias_map_;
 };

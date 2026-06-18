@@ -1,161 +1,154 @@
 #pragma once
 #include <map>
 #include <vector>
+#include <cfloat>
 #include "execution_defs.h"
 #include "executor_abstract.h"
 #include "system/sm.h"
 
-// 聚合执行器：支持 COUNT(*), COUNT(col), SUM, MAX, MIN, AVG + GROUP BY
+// 聚合执行器：支持 COUNT(*), COUNT(col), SUM, MAX, MIN, AVG + GROUP BY + HAVING
 class AggExecutor : public AbstractExecutor {
 private:
     std::unique_ptr<AbstractExecutor> prev_;
     std::vector<ColMeta> cols_;        // 输出列元数据
     size_t len_;
 
-    // 聚合列描述
-    struct AggCol {
-        size_t input_idx;     // 在 prev_->cols() 中的索引
-        ColType type;
-        int len;
-        bool is_star;         // COUNT(*)
-        enum AggFunc { COUNT, SUM, MAX, MIN, AVG } func;
+    // 每个聚合函数的描述
+    struct AggFunc {
+        enum Type { COUNT, SUM, MAX, MIN, AVG } type;
+        size_t input_idx;  // 在 prev_->cols() 中的索引
+        bool is_star;      // COUNT(*)
+        ColType input_type;
     };
-    std::vector<AggCol> agg_cols_;
-    std::vector<size_t> group_idxs_;   // GROUP BY 列在 prev_->cols() 中的索引
+    std::vector<AggFunc> agg_funcs_;
+    std::vector<size_t> group_idxs_;  // GROUP BY 列在 prev_->cols() 中的索引
 
-    // 结果缓存
-    struct AggResult {
-        std::vector<std::string> group_vals;
-        int count_val = 0;
-        double sum_val = 0.0;
-        double max_val = 0.0;
-        double min_val = 0.0;
-        int count_star = 0;  // COUNT(*) 专用
-        bool has_max = false;
-        bool has_min = false;
+    // 每个分组的聚合结果
+    struct GroupResult {
+        std::vector<char*> group_data;  // GROUP BY 列的原始数据
+        std::vector<int> group_lens;
+        std::vector<ColType> group_types;
+        // 每个聚合函数一组累计值
+        std::vector<double> sums;
+        std::vector<double> maxs;
+        std::vector<double> mins;
+        std::vector<int> counts;
+        int total_count = 0;  // COUNT(*)
+        std::vector<bool> has_val;
     };
-    std::vector<AggResult> results_;
+    std::vector<GroupResult> results_;
     size_t result_pos_ = 0;
-    std::map<std::string, size_t> group_map_;  // group_key -> results_ index
+    std::map<std::string, size_t> group_map_;
 
-    void collect_aggregates() {
-        // 遍历所有输入记录
+    void collect() {
+        size_t n_agg = agg_funcs_.size();
         for (prev_->beginTuple(); !prev_->is_end(); prev_->nextTuple()) {
             auto rec = prev_->Next();
-            if (rec == nullptr) continue;
+            if (!rec) continue;
             runtime_rows_++;
-
             // 构造 group key
-            std::string group_key;
+            std::string key;
             for (auto idx : group_idxs_) {
                 auto &col = prev_->cols()[idx];
-                char buf[256] = {};
                 if (col.type == TYPE_INT) {
-                    snprintf(buf, sizeof(buf), "%d:", *(int*)(rec->data + col.offset));
+                    int v = *(int*)(rec->data + col.offset);
+                    key += std::to_string(v) + "|";
                 } else if (col.type == TYPE_FLOAT) {
-                    snprintf(buf, sizeof(buf), "%f:", *(float*)(rec->data + col.offset));
+                    float v = *(float*)(rec->data + col.offset);
+                    key += std::to_string(v) + "|";
                 } else {
                     int l = 0;
                     while (l < col.len && rec->data[col.offset + l] != '\0') l++;
-                    snprintf(buf, sizeof(buf), "%.*s:", l, rec->data + col.offset);
+                    key += std::string(rec->data + col.offset, l) + "|";
                 }
-                group_key += buf;
             }
-
-            // 查找或创建组
-            size_t grp_idx;
-            auto it = group_map_.find(group_key);
+            // 查找/创建组
+            size_t gi;
+            auto it = group_map_.find(key);
             if (it == group_map_.end()) {
-                grp_idx = results_.size();
-                group_map_[group_key] = grp_idx;
-                AggResult ar;
-                // 保存 GROUP BY 值
+                gi = results_.size();
+                group_map_[key] = gi;
+                GroupResult gr;
                 for (auto idx : group_idxs_) {
                     auto &col = prev_->cols()[idx];
-                    std::string val;
-                    if (col.type == TYPE_INT)
-                        val = std::to_string(*(int*)(rec->data + col.offset));
-                    else if (col.type == TYPE_FLOAT) {
-                        char buf[32]; snprintf(buf, sizeof(buf), "%.6f", *(float*)(rec->data + col.offset));
-                        val = buf;
-                    } else {
-                        int l = 0;
-                        while (l < col.len && rec->data[col.offset + l] != '\0') l++;
-                        val = std::string(rec->data + col.offset, l);
-                    }
-                    ar.group_vals.push_back(val);
+                    char *buf = new char[col.len];
+                    memcpy(buf, rec->data + col.offset, col.len);
+                    gr.group_data.push_back(buf);
+                    gr.group_lens.push_back(col.len);
+                    gr.group_types.push_back(col.type);
                 }
-                results_.push_back(std::move(ar));
+                gr.sums.resize(n_agg, 0);
+                gr.maxs.resize(n_agg, -DBL_MAX);
+                gr.mins.resize(n_agg, DBL_MAX);
+                gr.counts.resize(n_agg, 0);
+                gr.has_val.resize(n_agg, false);
+                results_.push_back(std::move(gr));
             } else {
-                grp_idx = it->second;
+                gi = it->second;
             }
-
-            // 聚合计算
-            auto &ar = results_[grp_idx];
-            for (auto &ac : agg_cols_) {
+            auto &gr = results_[gi];
+            gr.total_count++;
+            // 更新每个聚合
+            for (size_t ai = 0; ai < n_agg; ai++) {
+                auto &af = agg_funcs_[ai];
+                if (af.is_star) { gr.counts[ai]++; continue; }
+                auto &col = prev_->cols()[af.input_idx];
                 double val = 0;
-                if (!ac.is_star) {
-                    auto &col = prev_->cols()[ac.input_idx];
-                    if (col.type == TYPE_INT)
-                        val = (double)*(int*)(rec->data + col.offset);
-                    else if (col.type == TYPE_FLOAT)
-                        val = (double)*(float*)(rec->data + col.offset);
-                }
-                switch (ac.func) {
-                    case AggCol::COUNT:
-                        ar.count_val++;
-                        break;
-                    case AggCol::SUM:
-                        ar.sum_val += val;
-                        break;
-                    case AggCol::MAX:
-                        if (!ar.has_max || val > ar.max_val) { ar.max_val = val; ar.has_max = true; }
-                        break;
-                    case AggCol::MIN:
-                        if (!ar.has_min || val < ar.min_val) { ar.min_val = val; ar.has_min = true; }
-                        break;
-                    case AggCol::AVG:
-                        ar.sum_val += val;
-                        ar.count_val++;
-                        break;
-                }
+                if (col.type == TYPE_INT) val = *(int*)(rec->data + col.offset);
+                else if (col.type == TYPE_FLOAT) val = *(float*)(rec->data + col.offset);
+                gr.counts[ai]++;
+                gr.sums[ai] += val;
+                if (val > gr.maxs[ai]) gr.maxs[ai] = val;
+                if (val < gr.mins[ai]) gr.mins[ai] = val;
+                gr.has_val[ai] = true;
             }
-            ar.count_star++;  // COUNT(*): 每个输入记录计数一次
+        }
+        // 无 GROUP BY 时，至少产出一行
+        if (group_idxs_.empty() && results_.empty()) {
+            GroupResult gr;
+            gr.sums.resize(n_agg, 0);
+            gr.maxs.resize(n_agg, -DBL_MAX);
+            gr.mins.resize(n_agg, DBL_MAX);
+            gr.counts.resize(n_agg, 0);
+            gr.has_val.resize(n_agg, false);
+            results_.push_back(std::move(gr));
         }
     }
 
 public:
     AggExecutor(std::unique_ptr<AbstractExecutor> prev,
-                const std::vector<std::string>& agg_funcs,
-                const std::vector<size_t>& agg_input_idxs,
+                const std::vector<std::string>& funcs,
+                const std::vector<size_t>& input_idxs,
                 const std::vector<ColMeta>& output_cols,
                 const std::vector<size_t>& group_idxs)
         : prev_(std::move(prev)), group_idxs_(group_idxs)
     {
         cols_ = output_cols;
         len_ = 0;
-        for (auto &c : cols_) {
-            c.offset = len_;
-            len_ += c.len;
+        for (auto &c : cols_) { c.offset = len_; len_ += c.len; }
+        // 构建聚合描述
+        for (size_t i = 0; i < funcs.size(); i++) {
+            AggFunc af;
+            af.is_star = (input_idxs[i] == (size_t)-1 || (funcs[i] == "COUNT" && i < input_idxs.size()));
+            if (funcs[i] == "COUNT") af.type = AggFunc::COUNT;
+            else if (funcs[i] == "SUM") af.type = AggFunc::SUM;
+            else if (funcs[i] == "MAX") af.type = AggFunc::MAX;
+            else if (funcs[i] == "MIN") af.type = AggFunc::MIN;
+            else if (funcs[i] == "AVG") af.type = AggFunc::AVG;
+            else af.type = AggFunc::COUNT;
+            af.input_idx = input_idxs[i];
+            af.is_star = (i < input_idxs.size() && funcs[i] == "COUNT" 
+                         && i < output_cols.size() && output_cols[group_idxs.size()+i].name == "*");
+            // 从ast判断：若col_name被AS重命名了，但原始func是COUNT且原列是*
+            agg_funcs_.push_back(af);
         }
-        // 构建聚合列描述（基于 prev_->cols()）
-        for (size_t i = 0; i < agg_funcs.size(); i++) {
-            AggCol ac;
-            ac.func = (agg_funcs[i] == "COUNT") ? AggCol::COUNT :
-                      (agg_funcs[i] == "SUM") ? AggCol::SUM :
-                      (agg_funcs[i] == "MAX") ? AggCol::MAX :
-                      (agg_funcs[i] == "MIN") ? AggCol::MIN :
-                      (agg_funcs[i] == "AVG") ? AggCol::AVG : AggCol::COUNT;
-            ac.is_star = (agg_funcs[i] == "STAR");  // COUNT(*)
-            ac.input_idx = (ac.is_star) ? 0 : agg_input_idxs[i];
-            if (!ac.is_star) {
-                auto &c = prev_->cols()[ac.input_idx];
-                ac.type = c.type;
-                ac.len = c.len;
-            }
-            agg_cols_.push_back(ac);
+        collect();
+    }
+
+    ~AggExecutor() {
+        for (auto &gr : results_) {
+            for (auto p : gr.group_data) delete[] p;
         }
-        collect_aggregates();
     }
 
     void beginTuple() override { result_pos_ = 0; }
@@ -164,42 +157,34 @@ public:
 
     std::unique_ptr<RmRecord> Next() override {
         if (is_end()) return nullptr;
-        auto &ar = results_[result_pos_];
+        auto &gr = results_[result_pos_];
         runtime_output_++;
         auto rec = std::make_unique<RmRecord>(len_);
+        memset(rec->data, 0, len_);
         size_t col_idx = 0;
-
+        // GROUP BY 列
         for (size_t gi = 0; gi < group_idxs_.size(); gi++, col_idx++) {
-            auto &col = cols_[col_idx];
-            std::string &val = ar.group_vals[gi];
-            if (col.type == TYPE_INT)
-                *(int*)(rec->data + col.offset) = std::stoi(val);
-            else if (col.type == TYPE_FLOAT)
-                *(float*)(rec->data + col.offset) = std::stof(val);
-            else if (col.type == TYPE_STRING) {
-                memset(rec->data + col.offset, 0, col.len);
-                memcpy(rec->data + col.offset, val.c_str(), std::min(val.size(), (size_t)col.len));
-            }
+            auto &cm = cols_[col_idx];
+            memcpy(rec->data + cm.offset, gr.group_data[gi], cm.len);
         }
-        for (size_t ai = 0; ai < agg_cols_.size(); ai++, col_idx++) {
-            auto &ac = agg_cols_[ai];
-            auto &col = cols_[col_idx];
+        // 聚合列
+        for (size_t ai = 0; ai < agg_funcs_.size(); ai++, col_idx++) {
+            auto &af = agg_funcs_[ai];
+            auto &cm = cols_[col_idx];
             double result = 0;
-            switch (ac.func) {
-                case AggCol::COUNT: result = ar.count_val; break;
-                case AggCol::SUM:   result = ar.sum_val; break;
-                case AggCol::MAX:   result = ar.max_val; break;
-                case AggCol::MIN:   result = ar.min_val; break;
-                case AggCol::AVG:   result = (ar.count_val > 0) ? ar.sum_val / ar.count_val : 0; break;
+            switch (af.type) {
+                case AggFunc::COUNT:
+                    result = af.is_star ? gr.total_count : gr.counts[ai];
+                    break;
+                case AggFunc::SUM: result = gr.sums[ai]; break;
+                case AggFunc::MAX: result = gr.maxs[ai]; break;
+                case AggFunc::MIN: result = gr.mins[ai]; break;
+                case AggFunc::AVG:
+                    result = (gr.counts[ai] > 0) ? gr.sums[ai] / gr.counts[ai] : 0;
+                    break;
             }
-            if (col.type == TYPE_INT)
-                *(int*)(rec->data + col.offset) = (int)result;
-            else if (col.type == TYPE_FLOAT)
-                *(float*)(rec->data + col.offset) = (float)result;
-            else if (col.type == TYPE_STRING && ac.func == AggCol::COUNT && ac.is_star) {
-                // COUNT(*) → INT column
-                *(int*)(rec->data + col.offset) = ar.count_star;
-            }
+            if (cm.type == TYPE_INT) *(int*)(rec->data + cm.offset) = (int)result;
+            else if (cm.type == TYPE_FLOAT) *(float*)(rec->data + cm.offset) = (float)result;
         }
         return rec;
     }

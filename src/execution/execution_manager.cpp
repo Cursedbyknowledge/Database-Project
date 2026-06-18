@@ -182,6 +182,7 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
         out += "\n";
         rec_printer.print_record(columns, context);
         num_rec++;
+        if (context->limit_val_ > 0 && (int)num_rec >= context->limit_val_) break;
         if (num_rec > 100000) break;
     }
     rec_printer.print_separator(context);
