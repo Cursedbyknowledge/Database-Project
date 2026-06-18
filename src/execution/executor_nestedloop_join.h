@@ -173,21 +173,24 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
                         return;
                     }
                     right_->nextTuple();
-                    if (++safety > 100000) { isend = true; return; }
+                    if (++safety > 1000000) { isend = true; return; }
                 }
             }
+            // 右表耗尽，推进左表并重置右表
             left_->nextTuple();
             left_rec_ = nullptr;
             while (!left_->is_end()) {
                 left_rec_ = left_->Next();
                 if (left_rec_ != nullptr) break;
                 left_->nextTuple();
-                if (++safety > 100000) { isend = true; return; }
             }
             if (left_rec_ != nullptr) {
                 right_->beginTuple();
+                // 强制定位：SeqScan beginTuple后可能is_end残留
+                while (!right_->is_end() && right_->Next() == nullptr) {
+                    right_->nextTuple();
+                }
             }
-            if (++safety > 100000) { isend = true; return; }
         }
         isend = true;
     }
@@ -212,19 +215,18 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
     void beginTuple() override {
         isend = false;
         left_->beginTuple();
-        
         while (!left_->is_end()) {
             left_rec_ = left_->Next();
             if (left_rec_ != nullptr) break;
             left_->nextTuple();
         }
-        
-        if (left_->is_end()) {
-            isend = true;
-            return;
-        }
-        
+        if (left_->is_end()) { isend = true; return; }
+
         right_->beginTuple();
+        // 强制定位：防止 beginTuple 后 is_end() 残留为 true
+        while (!right_->is_end() && right_->Next() == nullptr) {
+            right_->nextTuple();
+        }
         advance_to_match();
     }
 
