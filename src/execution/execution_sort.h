@@ -19,23 +19,24 @@ See the Mulan PSL v2 for more details. */
 class SortExecutor : public AbstractExecutor {
    private:
     std::unique_ptr<AbstractExecutor> prev_;
-    ColMeta sort_col_;
-    bool is_desc_;
+    std::vector<ColMeta> sort_cols_;
+    std::vector<bool> is_desc_;
     std::vector<std::unique_ptr<RmRecord>> all_tuples_;
     size_t tuple_idx_;
 
    public:
-    SortExecutor(std::unique_ptr<AbstractExecutor> prev, TabCol sel_cols, bool is_desc) {
+    SortExecutor(std::unique_ptr<AbstractExecutor> prev, std::vector<TabCol> sel_cols, std::vector<bool> is_desc) {
         prev_ = std::move(prev);
-                // Look up sort column from child executor's cols
         auto& pc = prev_->cols();
-        for (auto& col : pc) {
-            if (col.name == sel_cols.col_name && (sel_cols.tab_name.empty() || col.tab_name == sel_cols.tab_name)) {
-                sort_col_ = col;
-                break;
+        for (auto& sc : sel_cols) {
+            for (auto& col : pc) {
+                if (col.name == sc.col_name && (sc.tab_name.empty() || col.tab_name == sc.tab_name)) {
+                    sort_cols_.push_back(col);
+                    break;
+                }
             }
         }
-        is_desc_ = is_desc;
+        is_desc_ = std::move(is_desc);
         tuple_idx_ = 0;
     }
 
@@ -50,9 +51,14 @@ class SortExecutor : public AbstractExecutor {
         }
         std::sort(all_tuples_.begin(), all_tuples_.end(),
             [this](const std::unique_ptr<RmRecord>& a, const std::unique_ptr<RmRecord>& b) {
-                int cmp = ix_compare(a->data + sort_col_.offset, b->data + sort_col_.offset,
-                                    sort_col_.type, sort_col_.len);
-                return is_desc_ ? cmp > 0 : cmp < 0;
+                for (size_t i = 0; i < sort_cols_.size(); i++) {
+                    int cmp = ix_compare(a->data + sort_cols_[i].offset, b->data + sort_cols_[i].offset,
+                                        sort_cols_[i].type, sort_cols_[i].len);
+                    if (cmp != 0) {
+                        return is_desc_[i] ? cmp > 0 : cmp < 0;
+                    }
+                }
+                return false;
             });
         tuple_idx_ = 0;
     }

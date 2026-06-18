@@ -188,7 +188,10 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     rec_printer.print_separator(context);
     RecordPrinter::print_record_count(num_rec, context);
 
-    write_to_output(sm_manager_, out);
+    // Only write to output.txt when there are actual result rows
+    if (num_rec > 0) {
+        write_to_output(sm_manager_, out);
+    }
 }
 
 // 自由函数：序列化计划树
@@ -300,8 +303,11 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
         explain_plan(pp->subplan_, indent + 1, rows_map, out_rows_map, out, alias_map);
     } else if (auto sort = std::dynamic_pointer_cast<SortPlan>(p)) {
         out += std::string(indent, '\t') + "Sort(column=";
-        out += alias_for(sort->sel_col_.tab_name) + "." + sort->sel_col_.col_name;
-        out += ", direction=" + std::string(sort->is_desc_ ? "DESC" : "ASC");
+        for (size_t si = 0; si < sort->sel_cols_.size(); si++) {
+            if (si > 0) out += ", ";
+            out += alias_for(sort->sel_cols_[si].tab_name) + "." + sort->sel_cols_[si].col_name;
+            out += " " + std::string(sort->is_desc_[si] ? "DESC" : "ASC");
+        }
         out += ", rows=" + std::to_string(rows) + ")\n";
         explain_plan(sort->subplan_, indent + 1, rows_map, out_rows_map, out, alias_map);
     }

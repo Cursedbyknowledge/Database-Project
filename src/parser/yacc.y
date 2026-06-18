@@ -611,11 +611,19 @@ opt_order_clause:
     ;
 
 order_clause:
-      col  opt_asc_desc 
-    { 
-        $$ = std::make_shared<OrderBy>($1, $2);
+      col  opt_asc_desc
+    {
+        std::vector<std::shared_ptr<Col>> cols = {$1};
+        std::vector<OrderByDir> dirs = {$2};
+        $$ = std::make_shared<OrderBy>(cols, dirs);
     }
-    ;   
+    | order_clause ',' col opt_asc_desc
+    {
+        $1->cols.push_back($3);
+        $1->orderby_dirs.push_back($4);
+        $$ = $1;
+    }
+    ;
 
 opt_asc_desc:
     ASC          { $$ = OrderBy_ASC;     }

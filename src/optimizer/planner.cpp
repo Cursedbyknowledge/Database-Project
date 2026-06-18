@@ -372,22 +372,23 @@ std::shared_ptr<Plan> Planner::generate_sort_plan(std::shared_ptr<Query> query, 
     std::vector<std::string> tables = query->tables;
     std::vector<ColMeta> all_cols;
     for (auto &sel_tab_name : tables) {
-        // 这里db_不能写成get_db(), 注意要传指针
         const auto &sel_tab_cols = sm_manager_->db_.get_table(sel_tab_name).cols;
         all_cols.insert(all_cols.end(), sel_tab_cols.begin(), sel_tab_cols.end());
     }
-    TabCol sel_col;
-    bool found_gs = false;
-    for (auto &col : all_cols) {
-        if(col.name.compare(x->order->cols->col_name) == 0 ) {
-            sel_col = {.tab_name = col.tab_name, .col_name = col.name};
-            found_gs = true;
-            break;
+    std::vector<TabCol> sel_cols;
+    std::vector<bool> is_desc;
+    for (size_t i = 0; i < x->order->cols.size(); i++) {
+        auto& ocol = x->order->cols[i];
+        for (auto &col : all_cols) {
+            if (col.name == ocol->col_name) {
+                sel_cols.push_back({.tab_name = col.tab_name, .col_name = col.name});
+                is_desc.push_back(x->order->orderby_dirs[i] == ast::OrderBy_DESC);
+                break;
+            }
         }
     }
-    if (!found_gs) return plan;
-    return std::make_shared<SortPlan>(T_Sort, std::move(plan), sel_col, 
-                                    x->order->orderby_dir == ast::OrderBy_DESC);
+    if (sel_cols.empty()) return plan;
+    return std::make_shared<SortPlan>(T_Sort, std::move(plan), sel_cols, is_desc);
 }
 
 
@@ -567,19 +568,20 @@ std::shared_ptr<Plan> Planner::generate_select_plan(std::shared_ptr<Query> query
                                                         std::move(proj_cols), false);
         // Reapply ORDER BY after aggregation
         if (sel_stmt && sel_stmt->has_sort) {
-            TabCol sort_col;
-            bool found_sort = false;
-            for (auto& oc : out_cols) {
-                if (oc.name == sel_stmt->order->cols->col_name) {
-                    sort_col = {.tab_name = "", .col_name = oc.name};
-                    found_sort = true;
-                    break;
+            std::vector<TabCol> sort_cols;
+            std::vector<bool> sort_desc;
+            for (size_t i = 0; i < sel_stmt->order->cols.size(); i++) {
+                for (auto& oc : out_cols) {
+                    if (oc.name == sel_stmt->order->cols[i]->col_name) {
+                        sort_cols.push_back({.tab_name = "", .col_name = oc.name});
+                        sort_desc.push_back(sel_stmt->order->orderby_dirs[i] == ast::OrderBy_DESC);
+                        break;
+                    }
                 }
             }
-            if (found_sort) {
+            if (!sort_cols.empty()) {
                 plannerRoot = std::make_shared<SortPlan>(T_Sort, std::move(plannerRoot),
-                                                          sort_col,
-                                                          sel_stmt->order->orderby_dir == ast::OrderBy_DESC);
+                                                          sort_cols, sort_desc);
             }
         }
         return plannerRoot;

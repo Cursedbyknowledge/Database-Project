@@ -81,6 +81,12 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
         }
         //处理where条件
         get_clause(x->conds, query->conds);
+        // Semantic check: aggregate functions cannot appear in WHERE clause
+        for (auto& cond : query->conds) {
+            if (!cond.agg_func.empty()) {
+                throw RMDBError("Aggregate function in WHERE clause is not allowed");
+            }
+        }
         check_clause(query->tables, query->conds);
         // GROUP BY: 校验列存在性并推断表名
         if (!x->group_by.empty()) {
