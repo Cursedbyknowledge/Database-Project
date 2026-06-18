@@ -242,7 +242,8 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
         out += std::string(indent, '\t') + "Scan(table=" + sp->tab_name_ + ", type=";
         if (sp->tag == T_IndexScan) {
             out += "IndexScan, using_index=(";
-            auto& idx_cols = sp->index_col_names_;
+            auto idx_cols = sp->index_col_names_;
+            std::sort(idx_cols.begin(), idx_cols.end());
             for (size_t i = 0; i < idx_cols.size(); i++) {
                 if (i) out += ", ";
                 out += idx_cols[i];
@@ -295,6 +296,12 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
         }
         out += "], rows=" + std::to_string(rows) + ")\n";
         explain_plan(pp->subplan_, indent + 1, rows_map, out_rows_map, out, alias_map);
+    } else if (auto sort = std::dynamic_pointer_cast<SortPlan>(p)) {
+        out += std::string(indent, '\t') + "Sort(column=";
+        out += alias_for(sort->sel_col_.tab_name) + "." + sort->sel_col_.col_name;
+        out += ", direction=" + std::string(sort->is_desc_ ? "DESC" : "ASC");
+        out += ", rows=" + std::to_string(rows) + ")\n";
+        explain_plan(sort->subplan_, indent + 1, rows_map, out_rows_map, out, alias_map);
     }
 }
 
@@ -327,6 +334,8 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
                 collect(jp->left_, children[0]);
                 collect(jp->right_, children[1]);
             }
+        } else if (auto sp = std::dynamic_pointer_cast<SortPlan>(p)) {
+            if (!children.empty()) collect(sp->subplan_, children[0]);
         }
     };
     collect(plan, executorTreeRoot.get());
