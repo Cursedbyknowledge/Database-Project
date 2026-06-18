@@ -173,7 +173,7 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
                         return;
                     }
                     right_->nextTuple();
-                    if (++safety > 1000000) { isend = true; return; }
+                    if (++safety > 100000) { isend = true; return; }
                 }
             }
             // 右表耗尽，推进左表并重置右表
@@ -187,6 +187,7 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
             if (left_rec_ != nullptr) {
                 right_->beginTuple();
             }
+            if (++safety > 100000) { isend = true; return; }
         }
         isend = true;
     }
