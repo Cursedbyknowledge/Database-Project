@@ -27,13 +27,24 @@ class ProjectionExecutor : public AbstractExecutor {
         prev_ = std::move(prev);
         size_t curr_offset = 0;
         auto &prev_cols = prev_->cols();
-        for (auto &sel_col : sel_cols) {
-            auto pos = get_col(prev_cols, sel_col);
-            sel_idxs_.push_back(pos - prev_cols.begin());
-            auto col = *pos;
-            col.offset = curr_offset;
-            curr_offset += col.len;
-            cols_.push_back(col);
+        // SELECT *：全量投影（analyzer已展开*为实际列名，此处防御性保留）
+        if (sel_cols.empty() || (sel_cols.size() == 1 && sel_cols[0].col_name == "*")) {
+            for (size_t i = 0; i < prev_cols.size(); ++i) {
+                ColMeta col_meta = prev_cols[i];
+                col_meta.offset = curr_offset;
+                curr_offset += col_meta.len;
+                cols_.push_back(col_meta);
+                sel_idxs_.push_back(i);
+            }
+        } else {
+            for (auto &sel_col : sel_cols) {
+                auto pos = get_col(prev_cols, sel_col);
+                sel_idxs_.push_back(pos - prev_cols.begin());
+                auto col = *pos;
+                col.offset = curr_offset;
+                curr_offset += col.len;
+                cols_.push_back(col);
+            }
         }
         len_ = curr_offset;
     }

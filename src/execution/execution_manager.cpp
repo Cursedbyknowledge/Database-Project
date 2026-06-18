@@ -166,8 +166,11 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
             const char *rec_buf = Tuple->data + col.offset;
             if (col.type == TYPE_INT)
                 col_str = std::to_string(*(int *)rec_buf);
-            else if (col.type == TYPE_FLOAT)
-                col_str = std::to_string(*(float *)rec_buf);
+            else if (col.type == TYPE_FLOAT) {
+                char buf[32];
+                snprintf(buf, sizeof(buf), "%.6f", *(float *)rec_buf);
+                col_str = buf;
+            }
             else if (col.type == TYPE_STRING) {
                 int len = 0;
                 while (len < col.len && rec_buf[len] != '\0') len++;
