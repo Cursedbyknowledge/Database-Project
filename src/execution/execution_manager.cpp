@@ -296,6 +296,5 @@ void QlManager::explain_select(std::shared_ptr<Plan> plan,
 
 // 执行DML语句
 void QlManager::run_dml(std::unique_ptr<AbstractExecutor> exec){
-    exec->beginTuple();
     exec->Next();
 }
