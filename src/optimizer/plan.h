@@ -44,7 +44,8 @@ typedef enum PlanTag{
     T_SortMerge,    // sort merge join
     T_Sort,
     T_Projection,
-    T_Aggregate
+    T_Aggregate,
+    T_Union
 } PlanTag;
 
 // 查询执行计划
@@ -235,6 +236,31 @@ class SetKnobPlan : public Plan
         }
     ast::SetKnobType set_knob_type_;
     bool bool_value_;
+};
+
+// UNION 计划节点
+class UnionPlan : public Plan
+{
+    public:
+        UnionPlan(std::vector<std::shared_ptr<Plan>> sub_plans,
+                  std::vector<ColMeta> output_cols,
+                  std::vector<TabCol> sort_cols,
+                  std::vector<bool> sort_desc,
+                  std::shared_ptr<ast::UnionStmt> union_stmt = nullptr)
+        {
+            Plan::tag = T_Union;
+            sub_plans_ = std::move(sub_plans);
+            output_cols_ = std::move(output_cols);
+            sort_cols_ = std::move(sort_cols);
+            sort_desc_ = std::move(sort_desc);
+            union_stmt_ = std::move(union_stmt);
+        }
+        ~UnionPlan(){}
+        std::vector<std::shared_ptr<Plan>> sub_plans_;   // 每个子查询的扫描计划
+        std::vector<ColMeta> output_cols_;                // 提升后的输出列元数据
+        std::vector<TabCol> sort_cols_;                   // ORDER BY 列
+        std::vector<bool> sort_desc_;                     // ORDER BY 方向
+        std::shared_ptr<ast::UnionStmt> union_stmt_;     // 原始 AST 节点
 };
 
 class plannerInfo{

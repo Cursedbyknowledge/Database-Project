@@ -24,6 +24,7 @@ See the Mulan PSL v2 for more details. */
 #include "execution/executor_delete.h"
 #include "execution/execution_sort.h"
 #include "execution/executor_aggregate.h"
+#include "execution/executor_union.h"
 #include "common/common.h"
 
 typedef enum portalTag{
@@ -67,6 +68,17 @@ class Portal
             return std::make_shared<PortalStmt>(PORTAL_CMD_UTILITY, std::vector<TabCol>(), std::unique_ptr<AbstractExecutor>(), plan); 
         } else if (auto x = std::dynamic_pointer_cast<DDLPlan>(plan)) {
             return std::make_shared<PortalStmt>(PORTAL_MULTI_QUERY, std::vector<TabCol>(), std::unique_ptr<AbstractExecutor>(),plan);
+        } else if (auto x = std::dynamic_pointer_cast<UnionPlan>(plan)) {
+            // UNION 查询
+            std::unique_ptr<AbstractExecutor> root = std::make_unique<UnionExecutor>(
+                sm_manager_, x->union_stmt_, x->output_cols_, x->sort_cols_, x->sort_desc_);
+            // 构建输出列TabCol
+            std::vector<TabCol> sel_cols;
+            for (auto &col : x->output_cols_) {
+                sel_cols.push_back({.tab_name = col.tab_name, .col_name = col.name});
+            }
+            portalTag tag = context->explain_ ? PORTAL_EXPLAIN : PORTAL_ONE_SELECT;
+            return std::make_shared<PortalStmt>(tag, std::move(sel_cols), std::move(root), plan);
         } else if (auto x = std::dynamic_pointer_cast<DMLPlan>(plan)) {
             switch(x->tag) {
                 case T_select:

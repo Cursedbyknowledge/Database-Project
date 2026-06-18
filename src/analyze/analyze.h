@@ -49,6 +49,9 @@ class Query{
     std::vector<Condition> having;
     int limit_val = -1;
 
+    // UNION 输出列元数据（经过类型提升后）
+    std::vector<ColMeta> union_output_cols;
+
     Query(){}
 
 };

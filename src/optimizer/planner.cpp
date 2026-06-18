@@ -681,6 +681,44 @@ std::shared_ptr<Plan> Planner::do_planner(std::shared_ptr<Query> query, Context 
         context->explain_ = x->explain_analyze;
         context->limit_val_ = x->limit_val;
         plannerRoot = dml;
+    } else if (auto x = std::dynamic_pointer_cast<ast::UnionStmt>(query->parse)) {
+        // UNION 计划生成
+        std::vector<std::shared_ptr<Plan>> sub_plans;
+        for (auto &sub_sel : x->sub_selects) {
+            // 为每个子查询生成扫描计划
+            for (auto &tab_name : sub_sel->tabs) {
+                if (!sm_manager_->db_.is_table(tab_name)) {
+                    throw TableNotFoundError(tab_name);
+                }
+            }
+            // 简单单表或多表扫描
+            if (sub_sel->tabs.size() == 1) {
+                std::vector<std::string> index_col_names;
+                std::vector<Condition> conds;  // 子查询内 WHERE 条件由执行器处理
+                sub_plans.push_back(
+                    std::make_shared<ScanPlan>(T_SeqScan, sm_manager_, sub_sel->tabs[0], conds, index_col_names));
+            } else {
+                // 多表：生成简单 SeqScan（UNION 子查询一般是简单 SELECT *）
+                std::vector<std::string> index_col_names;
+                std::vector<Condition> conds;
+                sub_plans.push_back(
+                    std::make_shared<ScanPlan>(T_SeqScan, sm_manager_, sub_sel->tabs[0], conds, index_col_names));
+            }
+        }
+
+        // ORDER BY 信息
+        std::vector<TabCol> sort_cols;
+        std::vector<bool> sort_desc;
+        if (x->has_sort && x->order) {
+            for (size_t i = 0; i < x->order->cols.size(); i++) {
+                sort_cols.push_back({.tab_name = x->alias, .col_name = x->order->cols[i]->col_name});
+                sort_desc.push_back(x->order->orderby_dirs[i] == ast::OrderBy_DESC);
+            }
+        }
+
+        plannerRoot = std::make_shared<UnionPlan>(std::move(sub_plans), query->union_output_cols,
+                                                   std::move(sort_cols), std::move(sort_desc), x);
+        context->explain_ = x->explain_analyze;
     } else {
         throw InternalError("Unexpected AST root");
     }

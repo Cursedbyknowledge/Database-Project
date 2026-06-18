@@ -258,6 +258,23 @@ struct SelectStmt : public TreeNode {
             }
 };
 
+// UNION 派生表节点
+struct UnionStmt : public TreeNode {
+    std::vector<std::shared_ptr<SelectStmt>> sub_selects;  // UNION 各分支子查询
+    std::string alias;                                      // 派生表别名
+    std::shared_ptr<OrderBy> order;                        // 外层 ORDER BY（可选）
+    bool has_sort = false;
+    bool explain_analyze = false;
+
+    UnionStmt(std::vector<std::shared_ptr<SelectStmt>> sub_selects_,
+              std::string alias_,
+              std::shared_ptr<OrderBy> order_) :
+        sub_selects(std::move(sub_selects_)), alias(std::move(alias_)),
+        order(std::move(order_)) {
+            has_sort = (bool)order;
+        }
+};
+
 // set enable_nestloop
 struct SetStmt : public TreeNode {
     SetKnobType set_knob_type_;
@@ -302,6 +319,9 @@ struct SemValue {
     std::shared_ptr<OrderBy> sv_orderby;
 
     SetKnobType sv_setKnobType;
+
+    // UNION 支持
+    std::vector<std::shared_ptr<SelectStmt>> sv_sub_selects;
 };
 
 extern std::shared_ptr<ast::TreeNode> parse_tree;

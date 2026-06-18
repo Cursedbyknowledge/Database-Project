@@ -115,6 +115,109 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
 
         // LIMIT
         query->limit_val = x->limit_val;
+    } else if (auto x = std::dynamic_pointer_cast<ast::UnionStmt>(parse)) {
+        // UNION 语义分析：列数校验、类型兼容性检查、ORDER BY 验证
+        if (x->sub_selects.size() < 2) {
+            throw RMDBError("UNION requires at least 2 sub-queries");
+        }
+
+        // 获取每个子查询的输出列元数据
+        std::vector<std::vector<ColMeta>> all_sub_cols;
+        for (auto &sub_sel : x->sub_selects) {
+            // 检查表存在
+            for (auto &tab_name : sub_sel->tabs) {
+                if (!sm_manager_->db_.is_table(tab_name)) {
+                    throw TableNotFoundError(tab_name);
+                }
+            }
+            // 获取子查询的输出列
+            std::vector<ColMeta> sub_all_cols;
+            get_all_cols(sub_sel->tabs, sub_all_cols);
+            
+            std::vector<ColMeta> sub_output_cols;
+            if (sub_sel->cols.empty()) {
+                // SELECT *
+                sub_output_cols = sub_all_cols;
+            } else {
+                for (auto &sv_col : sub_sel->cols) {
+                    TabCol tc = {.tab_name = sv_col->tab_name, .col_name = sv_col->col_name};
+                    tc = check_column(sub_all_cols, tc);
+                    // 查找该列的元数据
+                    TabMeta &tab = sm_manager_->db_.get_table(tc.tab_name);
+                    auto col_it = tab.get_col(tc.col_name);
+                    sub_output_cols.push_back(*col_it);
+                }
+            }
+            all_sub_cols.push_back(sub_output_cols);
+        }
+
+        // 校验列数一致
+        size_t num_cols = all_sub_cols[0].size();
+        for (size_t i = 1; i < all_sub_cols.size(); i++) {
+            if (all_sub_cols[i].size() != num_cols) {
+                throw RMDBError("UNION queries must have the same number of columns");
+            }
+        }
+
+        // 校验类型兼容性并计算公共超类型
+        query->union_output_cols.resize(num_cols);
+        for (size_t col_idx = 0; col_idx < num_cols; col_idx++) {
+            ColType promoted_type = all_sub_cols[0][col_idx].type;
+            int promoted_len = all_sub_cols[0][col_idx].len;
+            std::string col_name = all_sub_cols[0][col_idx].name;
+
+            for (size_t sub_idx = 1; sub_idx < all_sub_cols.size(); sub_idx++) {
+                ColType t = all_sub_cols[sub_idx][col_idx].type;
+                int l = all_sub_cols[sub_idx][col_idx].len;
+
+                if (promoted_type == t) {
+                    // 同类型：CHAR 取 max(len)
+                    if (promoted_type == TYPE_STRING) {
+                        promoted_len = std::max(promoted_len, l);
+                    }
+                } else if ((promoted_type == TYPE_INT && t == TYPE_FLOAT) ||
+                           (promoted_type == TYPE_FLOAT && t == TYPE_INT)) {
+                    // INT + FLOAT → FLOAT
+                    promoted_type = TYPE_FLOAT;
+                    promoted_len = sizeof(float);
+                } else {
+                    // 不兼容类型
+                    throw RMDBError("UNION types are incompatible");
+                }
+            }
+
+            ColMeta cm;
+            cm.tab_name = x->alias;
+            cm.name = col_name;
+            cm.type = promoted_type;
+            cm.len = promoted_len;
+            cm.offset = 0;  // 稍后计算
+            query->union_output_cols[col_idx] = cm;
+        }
+
+        // 计算 offset
+        int offset = 0;
+        for (auto &cm : query->union_output_cols) {
+            cm.offset = offset;
+            offset += cm.len;
+        }
+
+        // 校验 ORDER BY 列名
+        if (x->has_sort && x->order) {
+            for (auto &ord_col : x->order->cols) {
+                bool found = false;
+                for (auto &out_col : query->union_output_cols) {
+                    if (ord_col->col_name == out_col.name) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    throw RMDBError("ORDER BY column not found in UNION output");
+                }
+            }
+        }
+
     } else if (auto x = std::dynamic_pointer_cast<ast::UpdateStmt>(parse)) {
         // 检查表是否存在
         if (!sm_manager_->db_.is_table(x->tab_name)) {

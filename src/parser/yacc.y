@@ -65,6 +65,8 @@ CHECKPOINT STATIC_CHECKPOINT
 %type <sv_setKnobType> set_knob_type
 %type <sv_cols> agg_item
 %type <sv_int> opt_limit
+%type <sv_node> union_select
+%type <sv_sub_selects> union_list
 
 %%
 start:
@@ -204,6 +206,39 @@ dml:
         sel->explain_analyze = true;
         sel->alias_map = g_alias_map_; g_alias_map_.clear();
         $$ = sel;
+    }
+    |   SELECT '*' FROM '(' union_list ')' AS IDENTIFIER opt_order_clause
+    {
+        $$ = std::make_shared<UnionStmt>($5, $8, $9);
+    }
+    |   EXPLAIN ANALYZE SELECT '*' FROM '(' union_list ')' AS IDENTIFIER opt_order_clause
+    {
+        auto us = std::make_shared<UnionStmt>($7, $10, $11);
+        us->explain_analyze = true;
+        $$ = us;
+    }
+    ;
+
+union_select:
+    SELECT selector FROM tableList optWhereClause
+    {
+        auto merged_conds = $5;
+        merged_conds.insert(merged_conds.end(), g_join_on_conds.begin(), g_join_on_conds.end());
+        g_join_on_conds.clear();
+        auto sel = std::make_shared<SelectStmt>($2, $4, merged_conds, nullptr);
+        sel->alias_map = g_alias_map_; g_alias_map_.clear();
+        $$ = sel;
+    }
+    ;
+
+union_list:
+    union_select
+    {
+        $$ = std::vector<std::shared_ptr<SelectStmt>>{std::dynamic_pointer_cast<SelectStmt>($1)};
+    }
+    |   union_list UNION_TOKEN union_select
+    {
+        $$.push_back(std::dynamic_pointer_cast<SelectStmt>($3));
     }
     ;
 
