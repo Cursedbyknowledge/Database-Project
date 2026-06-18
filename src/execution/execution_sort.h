@@ -27,7 +27,14 @@ class SortExecutor : public AbstractExecutor {
    public:
     SortExecutor(std::unique_ptr<AbstractExecutor> prev, TabCol sel_cols, bool is_desc) {
         prev_ = std::move(prev);
-        sort_col_ = prev_->get_col_offset(sel_cols);
+                // Look up sort column from child executor's cols
+        auto& pc = prev_->cols();
+        for (auto& col : pc) {
+            if (col.name == sel_cols.col_name && (sel_cols.tab_name.empty() || col.tab_name == sel_cols.tab_name)) {
+                sort_col_ = col;
+                break;
+            }
+        }
         is_desc_ = is_desc;
         tuple_idx_ = 0;
     }
@@ -64,4 +71,21 @@ class SortExecutor : public AbstractExecutor {
     bool is_end() const override { return tuple_idx_ >= all_tuples_.size(); }
 
     Rid &rid() override { return _abstract_rid; }
+
+    const std::vector<ColMeta>& cols() const override { return prev_->cols(); }
+
+    size_t tupleLen() const override { return prev_->tupleLen(); }
+
+    ColMeta get_col_offset(const TabCol& target) override {
+        // Properly look up column in prev_ executor's cols
+        auto& prev_cols = prev_->cols();
+        for (auto& col : prev_cols) {
+            if (col.name == target.col_name && (target.tab_name.empty() || col.tab_name == target.tab_name)) {
+                return col;
+            }
+        }
+        return ColMeta();
+    }
+
+    std::vector<AbstractExecutor*> get_children() override { return {prev_.get()}; }
 };

@@ -93,6 +93,20 @@ std::shared_ptr<Query> Analyze::do_analyze(std::shared_ptr<ast::TreeNode> parse)
         if (!x->having.empty()) {
             get_clause(x->having, query->having);
         }
+
+        // Semantic check: non-aggregate SELECT columns must appear in GROUP BY
+        if (!x->group_by.empty()) {
+            for (auto& sel_col : query->cols) {
+                bool in_group_by = false;
+                for (auto& gb : query->group_by) {
+                    if (sel_col.col_name == gb) { in_group_by = true; break; }
+                }
+                if (!in_group_by) {
+                    throw RMDBError("Column not in GROUP BY clause");
+                }
+            }
+        }
+
         // LIMIT
         query->limit_val = x->limit_val;
     } else if (auto x = std::dynamic_pointer_cast<ast::UpdateStmt>(parse)) {
