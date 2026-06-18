@@ -521,6 +521,38 @@ std::shared_ptr<Plan> Planner::generate_select_plan(std::shared_ptr<Query> query
                 agg_idx++;
             }
         }
+        // Add HAVING aggregates that are not already in the SELECT list
+        for (auto& hc : query->having) {
+            if (hc.agg_func.empty()) continue;
+            // Check if this aggregate is already tracked
+            bool already = false;
+            for (size_t ai = 0; ai < query->agg_funcs.size(); ai++) {
+                if (query->agg_funcs[ai] == hc.agg_func) {
+                    if (hc.lhs_col.col_name == "*" && query->agg_is_star[ai]) {
+                        already = true; break;
+                    }
+                    if (hc.lhs_col.col_name != "*" && !query->agg_is_star[ai]) {
+                        size_t ii = query->agg_input_idxs[ai];
+                        if (ii < scan_cols.size() && scan_cols[ii].name == hc.lhs_col.col_name) {
+                            already = true; break;
+                        }
+                    }
+                }
+            }
+            if (!already) {
+                size_t input_idx = 0;
+                bool is_star = (hc.lhs_col.col_name == "*");
+                if (!is_star) {
+                    for (size_t j = 0; j < scan_cols.size(); j++) {
+                        if (scan_cols[j].name == hc.lhs_col.col_name) { input_idx = j; break; }
+                    }
+                }
+                query->agg_funcs.push_back(hc.agg_func);
+                query->agg_input_idxs.push_back(input_idx);
+                query->agg_is_star.push_back(is_star);
+            }
+        }
+
         // 插入AggPlan
         plannerRoot = std::make_shared<AggPlan>(std::move(plannerRoot), query->agg_funcs,
                                                  query->agg_input_idxs, query->agg_is_star,

@@ -52,10 +52,13 @@ CHECKPOINT STATIC_CHECKPOINT
 %type <sv_str> tbName colName
 %type <sv_strs> tableList colNameList opt_group_clause
 %type <sv_col> col
+%type <sv_col> having_agg
 %type <sv_cols> colList selector
 %type <sv_set_clause> setClause
 %type <sv_set_clauses> setClauses
 %type <sv_cond> condition
+%type <sv_cond> having_condition
+%type <sv_col> having_lhs
 %type <sv_conds> whereClause optWhereClause havingClause optHavingClause
 %type <sv_orderby> order_clause opt_order_clause
 %type <sv_orderby_dir> opt_asc_desc
@@ -211,7 +214,7 @@ opt_group_clause:
 
 optHavingClause:
         /* epsilon */ { /* ignore */ }
-    |   HAVING whereClause
+    |   HAVING havingClause
     {
         $$ = $2;
     }
@@ -326,16 +329,78 @@ whereClause:
     ;
 
 havingClause:
-        condition
+        having_condition
     {
         $$ = std::vector<std::shared_ptr<BinaryExpr>>{$1};
     }
-    |   havingClause AND condition
+    |   havingClause AND having_condition
     {
         $$.push_back($3);
     }
     ;
 
+having_condition:
+        having_lhs op value
+    {
+        $$ = std::make_shared<BinaryExpr>($1, $2, $3);
+    }
+    ;
+
+having_lhs:
+        col
+    {
+        $$ = $1;
+    }
+    |   having_agg
+    {
+        $$ = $1;
+    }
+    ;
+
+having_agg:
+        COUNT '(' '*' ')'
+    {
+        auto c = std::make_shared<Col>("*", "*");
+        c->is_agg = true;
+        c->agg_func = "COUNT";
+        $$ = c;
+    }
+    |   COUNT '(' colName ')'
+    {
+        auto c = std::make_shared<Col>("", $3);
+        c->is_agg = true;
+        c->agg_func = "COUNT";
+        $$ = c;
+    }
+    |   MAX_TOKEN '(' colName ')'
+    {
+        auto c = std::make_shared<Col>("", $3);
+        c->is_agg = true;
+        c->agg_func = "MAX";
+        $$ = c;
+    }
+    |   MIN_TOKEN '(' colName ')'
+    {
+        auto c = std::make_shared<Col>("", $3);
+        c->is_agg = true;
+        c->agg_func = "MIN";
+        $$ = c;
+    }
+    |   SUM_TOKEN '(' colName ')'
+    {
+        auto c = std::make_shared<Col>("", $3);
+        c->is_agg = true;
+        c->agg_func = "SUM";
+        $$ = c;
+    }
+    |   AVG '(' colName ')'
+    {
+        auto c = std::make_shared<Col>("", $3);
+        c->is_agg = true;
+        c->agg_func = "AVG";
+        $$ = c;
+    }
+    ;
 col:
         tbName '.' colName
     {

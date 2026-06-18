@@ -78,6 +78,7 @@ struct Condition {
     bool is_rhs_val;  // true if right-hand side is a value (not a column)
     TabCol rhs_col;   // right-hand side column
     Value rhs_val;    // right-hand side value
+    std::string agg_func;  // non-empty if referencing aggregate (COUNT/SUM/MAX/MIN/AVG)
 };
 
 struct SetClause {
