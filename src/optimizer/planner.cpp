@@ -452,7 +452,14 @@ std::shared_ptr<Plan> Planner::generate_select_plan(std::shared_ptr<Query> query
 
     // 聚合查询特殊处理
     if (query->has_agg) {
-        auto scan = std::dynamic_pointer_cast<ScanPlan>(plannerRoot);
+        // 提取底层 ScanPlan（可能被 SortPlan 包裹）
+        std::shared_ptr<ScanPlan> scan;
+        if (auto sp = std::dynamic_pointer_cast<ScanPlan>(plannerRoot)) {
+            scan = sp;
+        } else if (auto sort = std::dynamic_pointer_cast<SortPlan>(plannerRoot)) {
+            scan = std::dynamic_pointer_cast<ScanPlan>(sort->subplan_);
+            plannerRoot = sort->subplan_;  // 聚合场景：去掉 sort, 聚合后再排序
+        }
         std::vector<ColMeta> out_cols;
         std::vector<ColMeta> empty_cols;
         auto &scan_cols = (scan) ? scan->cols_ : empty_cols;
