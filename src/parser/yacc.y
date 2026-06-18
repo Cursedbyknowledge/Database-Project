@@ -52,7 +52,7 @@ CHECKPOINT STATIC_CHECKPOINT
 %type <sv_str> tbName colName
 %type <sv_strs> tableList colNameList opt_group_clause
 %type <sv_col> col
-%type <sv_cols> colList selector agg_selector
+%type <sv_cols> colList selector
 %type <sv_set_clause> setClause
 %type <sv_set_clauses> setClauses
 %type <sv_cond> condition
@@ -180,25 +180,14 @@ dml:
     {
         $$ = std::make_shared<UpdateStmt>($2, $4, $5);
     }
-    |   SELECT selector FROM tableList optWhereClause opt_order_clause opt_limit
-    {
-        // 合并JOIN ON条件到WHERE条件
-        auto merged_conds = $5;
-        merged_conds.insert(merged_conds.end(), g_join_on_conds.begin(), g_join_on_conds.end());
-        g_join_on_conds.clear();
-        auto sel = std::make_shared<SelectStmt>($2, $4, merged_conds, $6);
-        if ($7 > 0) sel->limit_val = $7;
-        sel->alias_map = g_alias_map_; g_alias_map_.clear();
-        $$ = sel;
-    }
-    |   SELECT agg_selector FROM tableList optWhereClause opt_group_clause optHavingClause opt_order_clause opt_limit
+    |   SELECT selector FROM tableList optWhereClause opt_group_clause optHavingClause opt_order_clause opt_limit
     {
         auto merged_conds = $5;
         merged_conds.insert(merged_conds.end(), g_join_on_conds.begin(), g_join_on_conds.end());
         g_join_on_conds.clear();
         auto sel = std::make_shared<SelectStmt>($2, $4, merged_conds, $8);
-        sel->group_by = $6;   // GROUP BY columns
-        sel->having = $7;     // HAVING conditions
+        sel->group_by = $6;
+        sel->having = $7;
         if ($9 > 0) sel->limit_val = $9;
         sel->alias_map = g_alias_map_; g_alias_map_.clear();
         $$ = sel;
@@ -209,16 +198,6 @@ dml:
         merged_conds.insert(merged_conds.end(), g_join_on_conds.begin(), g_join_on_conds.end());
         g_join_on_conds.clear();
         auto sel = std::make_shared<SelectStmt>($4, $6, merged_conds, $8);
-        sel->explain_analyze = true;
-        sel->alias_map = g_alias_map_; g_alias_map_.clear();
-        $$ = sel;
-    }
-    |   EXPLAIN ANALYZE SELECT agg_selector FROM tableList optWhereClause opt_group_clause optHavingClause opt_order_clause
-    {
-        auto merged_conds = $7;
-        merged_conds.insert(merged_conds.end(), g_join_on_conds.begin(), g_join_on_conds.end());
-        g_join_on_conds.clear();
-        auto sel = std::make_shared<SelectStmt>($4, $6, merged_conds, $10);
         sel->explain_analyze = true;
         sel->alias_map = g_alias_map_; g_alias_map_.clear();
         $$ = sel;
@@ -373,9 +352,36 @@ colList:
     {
         $$ = std::vector<std::shared_ptr<Col>>{$1};
     }
+    |   col AS colName
+    {
+        auto c = $1; c->col_name = $3;
+        $$ = std::vector<std::shared_ptr<Col>>{c};
+    }
+    |   agg_item
+    {
+        $$ = $1;
+    }
+    |   agg_item AS colName
+    {
+        auto v = $1;
+        for (auto &c : v) { if (c->tab_name.empty()) c->tab_name = c->col_name; c->col_name = $3; }
+        $$ = v;
+    }
     |   colList ',' col
     {
         $$.push_back($3);
+    }
+    |   colList ',' col AS colName
+    {
+        auto c = $3; c->col_name = $5; $$.push_back(c);
+    }
+    |   colList ',' agg_item
+    {
+        for (auto &c : $3) $$.push_back(c);
+    }
+    |   colList ',' agg_item AS colName
+    {
+        for (auto &c : $3) { if (c->tab_name.empty()) c->tab_name = c->col_name; c->col_name = $5; $$.push_back(c); }
     }
     ;
 
@@ -443,21 +449,7 @@ selector:
     |   colList
     ;
 
-agg_selector:
-        colList
-    |   agg_item
-    {
-        // Single aggregate
-    }
-    |   agg_selector ',' col
-    {
-        // mixed agg and cols
-    }
-    |   agg_selector ',' agg_item
-    {
-        // multiple aggregates
-    }
-    ;
+    // agg_selector 已合并到 colList，不再需要独立规则
 
 agg_item:
         COUNT '(' '*' ')'
@@ -501,15 +493,6 @@ agg_item:
         c->is_agg = true;
         c->agg_func = "AVG";
         $$ = std::vector<std::shared_ptr<Col>>{c};
-    }
-    |   agg_item AS colName
-    {
-        auto v = $1;
-        for (auto &c : v) {
-            if (c->tab_name.empty()) c->tab_name = c->col_name;  // 保存原始输入列名
-            c->col_name = $3;  // AS别名设为输出列名
-        }
-        $$ = v;
     }
     ;
 
