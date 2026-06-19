@@ -251,39 +251,36 @@ std::shared_ptr<Plan> Planner::make_one_rel(std::shared_ptr<Query> query)
     {
         scantbl[i] = -1;
     }
-    // INLJ优化：为JOIN内表（右表）的连接列检测索引，有则升级为IndexScan
+    // INLJ优化：为JOIN内表（FROM中靠后的表）的连接列检测索引，有则升级为IndexScan
     for (auto &jc : conds) {
         if (jc.is_rhs_val) continue; // 跳过常量比较条件
         if (jc.op != OP_EQ) continue; // INLJ只处理等值连接
-        // 检查右表连接列是否有索引
-        std::string rhs_tab = jc.rhs_col.tab_name;
+        // 确定哪个表是内表（FROM顺序靠后的表）
+        int lhs_idx = -1, rhs_idx = -1;
         for (size_t i = 0; i < tables.size(); i++) {
-            auto sp = std::dynamic_pointer_cast<ScanPlan>(table_scan_executors[i]);
-            if (sp && sp->tab_name_ == rhs_tab && sp->tag == T_SeqScan) {
-                std::vector<std::string> idx_cols = {jc.rhs_col.col_name};
-                TabMeta& tab = sm_manager_->db_.get_table(rhs_tab);
-                if (tab.is_index(idx_cols)) {
-                    // 升级为IndexScan
-                    auto new_sp = std::make_shared<ScanPlan>(
-                        T_IndexScan, sm_manager_, rhs_tab, sp->conds_, idx_cols);
-                    new_sp->fed_conds_ = sp->fed_conds_;
-                    table_scan_executors[i] = new_sp;
-                }
-                break;
-            }
+            if (tables[i] == jc.lhs_col.tab_name) lhs_idx = i;
+            if (tables[i] == jc.rhs_col.tab_name) rhs_idx = i;
         }
-        // 同时检查左表（当右表列出现在lhs位置时）
-        std::string lhs_tab = jc.lhs_col.tab_name;
+        if (lhs_idx < 0 || rhs_idx < 0) continue;
+        // 内表 = FROM中位置靠后的表（将作为JOIN右子树）
+        std::string inner_tab;
+        std::string inner_col;
+        if (lhs_idx > rhs_idx) {
+            inner_tab = jc.lhs_col.tab_name;
+            inner_col = jc.lhs_col.col_name;
+        } else {
+            inner_tab = jc.rhs_col.tab_name;
+            inner_col = jc.rhs_col.col_name;
+        }
+        // 检查内表连接列是否有索引
         for (size_t i = 0; i < tables.size(); i++) {
             auto sp = std::dynamic_pointer_cast<ScanPlan>(table_scan_executors[i]);
-            if (sp && sp->tab_name_ == lhs_tab && sp->tag == T_SeqScan) {
-                // 只有当该表不是第一个表(驱动表)时才考虑升级为IndexScan
-                if (i == 0) break;
-                std::vector<std::string> idx_cols = {jc.lhs_col.col_name};
-                TabMeta& tab = sm_manager_->db_.get_table(lhs_tab);
+            if (sp && sp->tab_name_ == inner_tab && sp->tag == T_SeqScan) {
+                std::vector<std::string> idx_cols = {inner_col};
+                TabMeta& tab = sm_manager_->db_.get_table(inner_tab);
                 if (tab.is_index(idx_cols)) {
                     auto new_sp = std::make_shared<ScanPlan>(
-                        T_IndexScan, sm_manager_, lhs_tab, sp->conds_, idx_cols);
+                        T_IndexScan, sm_manager_, inner_tab, sp->conds_, idx_cols);
                     new_sp->fed_conds_ = sp->fed_conds_;
                     table_scan_executors[i] = new_sp;
                 }
@@ -302,6 +299,20 @@ std::shared_ptr<Plan> Planner::make_one_rel(std::shared_ptr<Query> query)
         auto it = conds.begin();
         while (it != conds.end()) {
             std::shared_ptr<Plan> left , right;
+            // 确保FROM中靠前的表作为左/外表（驱动表），靠后的作为右/内表
+            int lhs_pos = -1, rhs_pos = -1;
+            for (size_t i = 0; i < tables.size(); i++) {
+                if (tables[i] == it->lhs_col.tab_name) lhs_pos = i;
+                if (tables[i] == it->rhs_col.tab_name) rhs_pos = i;
+            }
+            if (lhs_pos >= 0 && rhs_pos >= 0 && lhs_pos > rhs_pos) {
+                // lhs表在FROM中靠后 → 交换条件方向，使FROM靠前的表成为左表
+                std::map<CompOp, CompOp> swap_op = {
+                    {OP_EQ, OP_EQ}, {OP_NE, OP_NE}, {OP_LT, OP_GT}, {OP_GT, OP_LT}, {OP_LE, OP_GE}, {OP_GE, OP_LE},
+                };
+                std::swap(it->lhs_col, it->rhs_col);
+                it->op = swap_op.at(it->op);
+            }
             left = pop_scan(scantbl, it->lhs_col.tab_name, joined_tables, table_scan_executors);
             right = pop_scan(scantbl, it->rhs_col.tab_name, joined_tables, table_scan_executors);
             std::vector<Condition> join_conds{*it};

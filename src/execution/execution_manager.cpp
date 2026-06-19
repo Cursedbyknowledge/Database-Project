@@ -188,10 +188,8 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     rec_printer.print_separator(context);
     RecordPrinter::print_record_count(num_rec, context);
 
-    // Only write to output.txt when there are actual result rows
-    if (num_rec > 0) {
-        write_to_output(sm_manager_, out);
-    }
+    // 始终写入output.txt（包括0行结果）
+    write_to_output(sm_manager_, out);
 }
 
 // 自由函数：序列化计划树
