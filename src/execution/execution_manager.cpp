@@ -211,7 +211,7 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
     
     if (auto sp = std::dynamic_pointer_cast<ScanPlan>(p)) {
         if (!sp->fed_conds_.empty()) {
-            out += std::string(indent, ' ') + "Filter(condition=[";
+            out += std::string(indent, '\t') + "Filter(condition=[";
             auto sorted_conds = sp->fed_conds_;
             std::sort(sorted_conds.begin(), sorted_conds.end(), [](auto &a, auto &b) {
                 return (a.lhs_col.tab_name + "." + a.lhs_col.col_name) <
@@ -244,7 +244,7 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
             out += "], rows=" + std::to_string(out_rows) + ")\n";
             indent++;
         }
-        out += std::string(indent, ' ') + "Scan(table=" + sp->tab_name_ + ", type=";
+        out += std::string(indent, '\t') + "Scan(table=" + sp->tab_name_ + ", type=";
         if (sp->tag == T_IndexScan) {
             out += "IndexScan, using_index=(";
             auto idx_cols = sp->index_col_names_;
@@ -259,7 +259,7 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
         }
         out += std::to_string(rows) + ")\n";
     } else if (auto jp = std::dynamic_pointer_cast<JoinPlan>(p)) {
-        out += std::string(indent, ' ') + "Join(";
+        out += std::string(indent, '\t') + "Join(";
         out += "tables=[";
         std::vector<std::string> tabs;
         auto collect = [&](auto self, std::shared_ptr<Plan> cp) -> void {
@@ -286,7 +286,7 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
         explain_plan(jp->left_, indent + 1, rows_map, out_rows_map, out, alias_map);
         explain_plan(jp->right_, indent + 1, rows_map, out_rows_map, out, alias_map);
     } else if (auto pp = std::dynamic_pointer_cast<ProjectionPlan>(p)) {
-        out += std::string(indent, ' ') + "Project(columns=[";
+        out += std::string(indent, '\t') + "Project(columns=[";
         if (pp->is_star_ || pp->sel_cols_.empty() || (pp->sel_cols_.size() == 1 && pp->sel_cols_[0].col_name == "*")) {
             out += "*";
         } else {
@@ -299,7 +299,7 @@ static void explain_plan(std::shared_ptr<Plan> p, int indent,
         out += "], rows=" + std::to_string(rows) + ")\n";
         explain_plan(pp->subplan_, indent + 1, rows_map, out_rows_map, out, alias_map);
     } else if (auto sort = std::dynamic_pointer_cast<SortPlan>(p)) {
-        out += std::string(indent, ' ') + "Sort(column=";
+        out += std::string(indent, '\t') + "Sort(column=";
         for (size_t si = 0; si < sort->sel_cols_.size(); si++) {
             if (si > 0) out += ", ";
             out += alias_for(sort->sel_cols_[si].tab_name) + "." + sort->sel_cols_[si].col_name;
