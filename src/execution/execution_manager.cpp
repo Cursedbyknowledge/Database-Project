@@ -150,10 +150,8 @@ void QlManager::select_from(std::unique_ptr<AbstractExecutor> executorTreeRoot, 
     rec_printer.print_record(captions, context);
     rec_printer.print_separator(context);
 
-    // output.txt 纯净表格输出
-    std::string out = "|";
-    for (auto &cap : captions) out += " " + cap + " |";
-    out += "\n";
+    // output.txt 纯净表格输出（仅数据行，不含表头）
+    std::string out;
 
     size_t num_rec = 0;
     for (executorTreeRoot->beginTuple(); !executorTreeRoot->is_end(); executorTreeRoot->nextTuple()) {
