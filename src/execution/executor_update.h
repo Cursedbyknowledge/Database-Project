@@ -103,6 +103,9 @@ class UpdateExecutor : public AbstractExecutor {
             }
             if (!can_update) throw DuplicateIndexError(tab_name_, "");  // 抛异常→Portal写failure
             
+            // Save old record for transaction rollback
+            RmRecord old_rec(rec->size, rec->data);
+            
             // 从所有索引中删除旧条目
             for (auto& index : tab_.indexes) {
                 auto ix_name = sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols);
@@ -138,6 +141,8 @@ class UpdateExecutor : public AbstractExecutor {
                 ih->insert_entry(new_key, rid, context_ ? context_->txn_ : nullptr);
                 delete[] new_key;
             }
+            // Record write operation for transaction rollback
+            context_->txn_->append_write_record(new WriteRecord(WType::UPDATE_TUPLE, tab_name_, rid, old_rec));
         }
         return nullptr;
     }

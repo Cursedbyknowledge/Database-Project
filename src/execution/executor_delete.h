@@ -67,6 +67,8 @@ class DeleteExecutor : public AbstractExecutor {
                 }
                 // 删除记录本身（只在匹配条件时删除）
                 fh_->delete_record(rid, context_);
+                // Record write operation for transaction rollback
+                context_->txn_->append_write_record(new WriteRecord(WType::DELETE_TUPLE, tab_name_, rid, *rec));
             }
         }
         return nullptr;

@@ -207,11 +207,11 @@ dml:
         sel->alias_map = g_alias_map_; g_alias_map_.clear();
         $$ = sel;
     }
-    |   SELECT '*' FROM '(' union_list ')' AS IDENTIFIER opt_order_clause
+    |   SELECT selector FROM '(' union_list ')' AS IDENTIFIER opt_order_clause
     {
         $$ = std::make_shared<UnionStmt>($5, $8, $9);
     }
-    |   EXPLAIN ANALYZE SELECT '*' FROM '(' union_list ')' AS IDENTIFIER opt_order_clause
+    |   EXPLAIN ANALYZE SELECT selector FROM '(' union_list ')' AS IDENTIFIER opt_order_clause
     {
         auto us = std::make_shared<UnionStmt>($7, $10, $11);
         us->explain_analyze = true;

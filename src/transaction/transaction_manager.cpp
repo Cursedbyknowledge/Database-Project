@@ -77,18 +77,77 @@ void TransactionManager::abort(Transaction * txn, LogManager *log_manager) {
         auto fh = sm_manager_->fhs_.at(wr->GetTableName()).get();
 
         switch (wr->GetWriteType()) {
-            case WType::INSERT_TUPLE:
-                // 回滚插入：删除已插入的记录
+            case WType::INSERT_TUPLE: {
+                // 回滚插入：先从索引删除条目，再删除记录
+                auto rec = fh->get_record(wr->GetRid(), nullptr);
+                auto& tab = sm_manager_->db_.get_table(wr->GetTableName());
+                for (auto& index : tab.indexes) {
+                    auto ix_name = sm_manager_->get_ix_manager()->get_index_name(wr->GetTableName(), index.cols);
+                    auto ih = sm_manager_->ihs_.at(ix_name).get();
+                    char* key = new char[index.col_tot_len];
+                    int offset = 0;
+                    for (int j = 0; j < index.col_num; ++j) {
+                        memcpy(key + offset, rec->data + index.cols[j].offset, index.cols[j].len);
+                        offset += index.cols[j].len;
+                    }
+                    ih->delete_entry(key, nullptr);
+                    delete[] key;
+                }
                 fh->delete_record(wr->GetRid(), nullptr);
                 break;
-            case WType::DELETE_TUPLE:
-                // 回滚删除：重新插入被删除的记录
+            }
+            case WType::DELETE_TUPLE: {
+                // 回滚删除：先重新插入记录，再插入索引条目
                 fh->insert_record(wr->GetRid(), wr->GetRecord().data);
+                auto& tab = sm_manager_->db_.get_table(wr->GetTableName());
+                for (auto& index : tab.indexes) {
+                    auto ix_name = sm_manager_->get_ix_manager()->get_index_name(wr->GetTableName(), index.cols);
+                    auto ih = sm_manager_->ihs_.at(ix_name).get();
+                    char* key = new char[index.col_tot_len];
+                    int offset = 0;
+                    for (int j = 0; j < index.col_num; ++j) {
+                        memcpy(key + offset, wr->GetRecord().data + index.cols[j].offset, index.cols[j].len);
+                        offset += index.cols[j].len;
+                    }
+                    ih->insert_entry(key, wr->GetRid(), nullptr);
+                    delete[] key;
+                }
                 break;
-            case WType::UPDATE_TUPLE:
-                // 回滚更新：恢复旧值
+            }
+            case WType::UPDATE_TUPLE: {
+                // 回滚更新：先从索引删除新键，恢复旧值，再插入旧键
+                auto rec = fh->get_record(wr->GetRid(), nullptr);
+                auto& tab = sm_manager_->db_.get_table(wr->GetTableName());
+                // 从索引中删除新键（当前值）
+                for (auto& index : tab.indexes) {
+                    auto ix_name = sm_manager_->get_ix_manager()->get_index_name(wr->GetTableName(), index.cols);
+                    auto ih = sm_manager_->ihs_.at(ix_name).get();
+                    char* key = new char[index.col_tot_len];
+                    int offset = 0;
+                    for (int j = 0; j < index.col_num; ++j) {
+                        memcpy(key + offset, rec->data + index.cols[j].offset, index.cols[j].len);
+                        offset += index.cols[j].len;
+                    }
+                    ih->delete_entry(key, nullptr);
+                    delete[] key;
+                }
+                // 恢复旧值
                 fh->update_record(wr->GetRid(), wr->GetRecord().data, nullptr);
+                // 向索引中插入旧键
+                for (auto& index : tab.indexes) {
+                    auto ix_name = sm_manager_->get_ix_manager()->get_index_name(wr->GetTableName(), index.cols);
+                    auto ih = sm_manager_->ihs_.at(ix_name).get();
+                    char* key = new char[index.col_tot_len];
+                    int offset = 0;
+                    for (int j = 0; j < index.col_num; ++j) {
+                        memcpy(key + offset, wr->GetRecord().data + index.cols[j].offset, index.cols[j].len);
+                        offset += index.cols[j].len;
+                    }
+                    ih->insert_entry(key, wr->GetRid(), nullptr);
+                    delete[] key;
+                }
                 break;
+            }
         }
         delete wr;
     }
