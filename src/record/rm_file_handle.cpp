@@ -59,8 +59,14 @@ void RmFileHandle::insert_record(const Rid& rid, char* buf) {
     char* slot = page_handle.get_slot(rid.slot_no);
     memcpy(slot, buf, file_hdr_.record_size);
     Bitmap::set(page_handle.bitmap, rid.slot_no);
+    bool was_not_full = (page_handle.page_hdr->num_records < file_hdr_.num_records_per_page);
     page_handle.page_hdr->num_records++;
-    if (page_handle.page_hdr->num_records < file_hdr_.num_records_per_page) {
+    // 只有当页面从非满变为满时才需要从空闲链表移除（但此处不负责移除）
+    // 如果之前页面不在空闲链表中（was full），现在仍然满，无需操作
+    // 如果之前页面在空闲链表中（was not full），无论现在满不满都不需要重复添加
+    // 唯一需要处理的情况：之前页面是满的（不在空闲链表），现在由于某种原因变为非满（不应该发生在此函数）
+    if (!was_not_full && page_handle.page_hdr->num_records < file_hdr_.num_records_per_page) {
+        // 页面之前是满的（不在空闲链表中），现在有空间了，加入空闲链表
         release_page_handle(page_handle);
     }
     buffer_pool_manager_->unpin_page(page_handle.page->get_page_id(), true);
